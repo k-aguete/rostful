@@ -239,6 +239,7 @@ class RostfulServer:
 		self.services = {}
 		self.topics = {}
 		self.actions = {}
+		self.base_path = '/'
 	
 	def add_service(self, service_name, ws_name=None, service_type=None):
 		resolved_service_name = rospy.resolve_name(service_name)
