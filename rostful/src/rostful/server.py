@@ -333,8 +333,11 @@ class RostfulServer:
 			pass
 	
 	def _handle_get(self, environ, start_response):
-		path = environ['PATH_INFO'][1:]
+		path = environ['PATH_INFO']
 		full = get_query_bool(environ['QUERY_STRING'], 'full')
+		
+		if self.base_path and path.startswith(self.base_path):
+			path = path[len(self.base_path):]
 		
 		json_suffix = '.json'
 		if path.endswith(json_suffix):
@@ -443,7 +446,10 @@ class RostfulServer:
 			return response_404(start_response)
 		
 	def _handle_post(self, environ, start_response):
-		name =  environ['PATH_INFO'][1:]
+		name =  environ['PATH_INFO']
+		
+		if self.base_path and name.startswith(self.base_path):
+			name = name[len(self.base_path):]
 		
 		try:
 			length = int(environ['CONTENT_LENGTH'])
@@ -528,6 +534,7 @@ def servermain():
 	
 	parser.add_argument('--host', default='')
 	parser.add_argument('-p', '--port', type=int, default=8080)
+	parser.add_argument('--base-path', default='/', help='The base path of the http request, usually starting and ending with a "/".')
 	
 	args = parser.parse_args(rospy.myargv()[1:])
 	
@@ -539,6 +546,8 @@ def servermain():
 		server.add_topics(args.publishes, allow_pub=False)
 		server.add_topics(args.subscribes, allow_sub=False)
 		server.add_actions(args.actions)
+		
+		server.base_path = args.base_path
 		
 		httpd = make_server(args.host, args.port, server.wsgifunc())
 		print 'Started server on port %d' % args.port
