@@ -1,6 +1,9 @@
 from __future__ import absolute_import
+import urlparse
 
 import roslib
+from .transforms import mappings, BadTransform, NullTransform
+
 roslib.load_manifest('rostful')
 import rospy
 from rospy.service import ServiceManager
@@ -336,20 +339,33 @@ class RostfulServer:
 	def _handle_get(self, environ, start_response):
 		path = environ['PATH_INFO']
 		full = get_query_bool(environ['QUERY_STRING'], 'full')
-		
+
+		kwargs = urlparse.parse_qs(environ['QUERY_STRING'], keep_blank_values=True)
+		for key in kwargs:
+			kwargs[key] = kwargs[key][-1]
+
 		if self.base_path and path.startswith(self.base_path):
 			path = path[len(self.base_path):]
 		
 		json_suffix = '.json'
-		if path.endswith(json_suffix):
-			path = path[:-len(json_suffix)]
-			jsn = True
+		jsn = False
+		handler = NullTransform()
+		last_path = path.split('/')[-1].split('.')
+		if len(last_path) > 1:
+			file_type = last_path[-1]
+			path = path[:-(len(file_type) + 1)]
+			# cuts suffix ('json') and preceding period
+			if file_type in mappings:
+				handler = mappings.get(file_type)
+			else:
+				handler = BadTransform()
 		else:
 			jsn = get_query_bool(environ['QUERY_STRING'], 'json')
 		
 		use_ros = environ.get('HTTP_ACCEPT','').find(ROS_MSG_MIMETYPE) != -1
 		
 		suffix = get_suffix(path)
+		# TODO: Figure out what this does
 		
 		if path == CONFIG_PATH:
 			dfile = definitions.manifest(self.services, self.topics, self.actions, full=full)
@@ -375,8 +391,10 @@ class RostfulServer:
 					return response_405(start_response)
 				
 				msg = topic.get()
-			
-			if use_ros:
+
+			if handler and handler.valid():
+				return handler.get(start_response, msg, **kwargs)
+			elif use_ros:
 				content_type = ROS_MSG_MIMETYPE
 				output_data = StringIO()
 				if msg is not None:
