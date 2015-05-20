@@ -71,7 +71,7 @@ class ImageTransform(GetTransform):
             palette = []
             for i in range(0, 256):
                 if i <= 100:
-                    palette.extend([i * 255/100] * 3)
+                    palette.extend([(100-i) * 255/100] * 3)
                 else:
                     palette.extend([170, 170, 255])
             im.putpalette(palette)
