@@ -84,7 +84,7 @@ class ImageTransform(GetTransform):
                      print "Cropped"
                 else:
                      im = bg
-            if maxsize > 0 and maxsize < min(im.size[0], im.size[1]):
+            if maxsize > 0 and maxsize < max(im.size[0], im.size[1]):
                 im.thumbnail([maxsize]*2)
             if not self.can_use_palette():
                 im = im.convert()
