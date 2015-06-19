@@ -27,7 +27,7 @@ The ROStful server
 ------------------
 The ROStful server can provide services, topics, and actions that are locally available over ROS as ROStful web services. Topics may be specified as publishing, subscribing, or both.
 
-ROStful uses the rosbridge JSON mapping by default, but binary serialized ROS messages can be sent with the `Content-Header` set to `application/vnd.ros.msg`. Giving this MIME type in the `Accept` header for queries without input (i.e., publishing topic methods) will cause the server to return serialized messages.
+ROStful uses the rosbridge JSON mapping by default, but binary serialized ROS messages can be sent with the `Content-Header` set to `application/vnd.ros.msg`. Giving this MIME type in the `Accept` header for queries without input (i.e., publishing topic methods) will cause the server to return serialized messages. Images are also supported.
 
 The ROStful client
 ------------------
