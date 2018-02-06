@@ -1,6 +1,9 @@
 from __future__ import absolute_import
+import urlparse
 
 import roslib
+from .transforms import mappings, BadTransform, NullTransform
+
 roslib.load_manifest('rostful')
 import rospy
 from rospy.service import ServiceManager
@@ -19,6 +22,8 @@ from . import message_conversion as msgconv
 from . import deffile, definitions
 
 from .util import ROS_MSG_MIMETYPE, get_query_bool
+
+import time
 
 class Service:
 	def __init__(self, service_name, service_type):
@@ -239,6 +244,7 @@ class RostfulServer:
 		self.services = {}
 		self.topics = {}
 		self.actions = {}
+		self.base_path = '/'
 	
 	def add_service(self, service_name, ws_name=None, service_type=None):
 		resolved_service_name = rospy.resolve_name(service_name)
@@ -333,19 +339,35 @@ class RostfulServer:
 			pass
 	
 	def _handle_get(self, environ, start_response):
-		path = environ['PATH_INFO'][1:]
+		path = environ['PATH_INFO']
 		full = get_query_bool(environ['QUERY_STRING'], 'full')
+
+		kwargs = urlparse.parse_qs(environ['QUERY_STRING'], keep_blank_values=True)
+		for key in kwargs:
+			kwargs[key] = kwargs[key][-1]
+
+		if self.base_path and path.startswith(self.base_path):
+			path = path[len(self.base_path):]
 		
 		json_suffix = '.json'
-		if path.endswith(json_suffix):
-			path = path[:-len(json_suffix)]
-			jsn = True
+		jsn = False
+		handler = NullTransform()
+		last_path = path.split('/')[-1].split('.')
+		if len(last_path) > 1:
+			file_type = last_path[-1]
+			path = path[:-(len(file_type) + 1)]
+			# cuts suffix ('json') and preceding period
+			if file_type in mappings:
+				handler = mappings.get(file_type)
+			else:
+				handler = BadTransform()
 		else:
 			jsn = get_query_bool(environ['QUERY_STRING'], 'json')
 		
 		use_ros = environ.get('HTTP_ACCEPT','').find(ROS_MSG_MIMETYPE) != -1
 		
 		suffix = get_suffix(path)
+		# TODO: Figure out what this does
 		
 		if path == CONFIG_PATH:
 			dfile = definitions.manifest(self.services, self.topics, self.actions, full=full)
@@ -371,8 +393,10 @@ class RostfulServer:
 					return response_405(start_response)
 				
 				msg = topic.get()
-			
-			if use_ros:
+
+			if handler and handler.valid():
+				return handler.get(start_response, msg, **kwargs)
+			elif use_ros:
 				content_type = ROS_MSG_MIMETYPE
 				output_data = StringIO()
 				if msg is not None:
@@ -443,10 +467,12 @@ class RostfulServer:
 			return response_404(start_response)
 		
 	def _handle_post(self, environ, start_response):
-		name =  environ['PATH_INFO'][1:]
+		name =  environ['PATH_INFO']
+		
+		if self.base_path and name.startswith(self.base_path):
+			name = name[len(self.base_path):]
 		
 		try:
-			#print 'calling service ', service.name
 			length = int(environ['CONTENT_LENGTH'])
 			content_type = environ['CONTENT_TYPE'].split(';')[0].strip()
 			use_ros = content_type == ROS_MSG_MIMETYPE
@@ -484,12 +510,16 @@ class RostfulServer:
 				msgconv.populate_instance(input_data, input_msg)
 			
 			ret_msg = None
+			print "passing here !!!"
 			if mode == 'service':
+				rospy.logwarn('calling service %s with msg : %s', service.name, input_msg)
 				ret_msg = service.call(input_msg)
 			elif mode == 'topic':
+				rospy.logwarn('publishing %s to topic %s', input_msg, topic.name)
 				topic.publish(input_msg)
 				return response_200(start_response, [], content_type='application/json')
 			elif mode == 'action':
+				rospy.logwarn('publishing %s to action %s', input_msg, action.name)
 				action.publish(action_mode, input_msg)
 				return response_200(start_response, [], content_type='application/json')
 			
@@ -524,9 +554,17 @@ def servermain():
 	parser.add_argument('--actions', nargs='+', help='Actions to advertise')
 	
 	parser.add_argument('--host', default='')
-	parser.add_argument('-p', '--port', type=int, default=80)
+	parser.add_argument('-p', '--port', type=int, default=8080)
+	parser.add_argument('--base-path', default='/', help='The base path of the http request, usually starting and ending with a "/".')
 	
 	args = parser.parse_args(rospy.myargv()[1:])
+	
+	init_delay = 0.0
+	if rospy.search_param('init_delay'):
+		init_delay = rospy.get_param('~init_delay')
+	
+	rospy.logwarn('rostful_server: Delaying the start %d seconds', init_delay)
+	time.sleep(init_delay)
 	
 	try:
 		server = RostfulServer()
@@ -537,13 +575,15 @@ def servermain():
 		server.add_topics(args.subscribes, allow_sub=False)
 		server.add_actions(args.actions)
 		
+		server.base_path = args.base_path
+		
 		httpd = make_server(args.host, args.port, server.wsgifunc())
-		print 'Started server on port %d' % args.port
+		rospy.loginfo('rostful_server: Started server on port %d' % args.port)
 		
 		#Wait forever for incoming http requests
 		httpd.serve_forever()
 		
 	except KeyboardInterrupt:
-		print 'Shutting down the server'
+		rospy.loginfo('rostful_server: Shutting down the server')
 		httpd.socket.close()
 		rospy.signal_shutdown('Closing')
