@@ -23,6 +23,8 @@ from . import deffile, definitions
 
 from .util import ROS_MSG_MIMETYPE, get_query_bool
 
+import time
+
 class Service:
 	def __init__(self, service_name, service_type):
 		self.name = service_name
@@ -557,6 +559,13 @@ def servermain():
 	
 	args = parser.parse_args(rospy.myargv()[1:])
 	
+	init_delay = 0.0
+	if rospy.search_param('init_delay'):
+		init_delay = rospy.get_param('~init_delay')
+	
+	rospy.logwarn('rostful_server: Delaying the start %d seconds', init_delay)
+	time.sleep(init_delay)
+	
 	try:
 		server = RostfulServer()
 		
@@ -569,12 +578,12 @@ def servermain():
 		server.base_path = args.base_path
 		
 		httpd = make_server(args.host, args.port, server.wsgifunc())
-		print 'Started server on port %d' % args.port
+		rospy.loginfo('rostful_server: Started server on port %d' % args.port)
 		
 		#Wait forever for incoming http requests
 		httpd.serve_forever()
 		
 	except KeyboardInterrupt:
-		print 'Shutting down the server'
+		rospy.loginfo('rostful_server: Shutting down the server')
 		httpd.socket.close()
 		rospy.signal_shutdown('Closing')
