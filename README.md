@@ -1,8 +1,6 @@
 ROStful
 =======
 
-[![Join the chat at https://gitter.im/asmodehn/rostful](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/asmodehn/rostful?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-
 ROStful is a lightweight web server for making ROS services, topics, and actions available as RESTful web services. It also provides a client proxy to expose a web service locally over ROS.
 
 ROStful web services primarily use the [rosbridge](http://wiki.ros.org/rosbridge_suite) JSON mapping for ROS messages. However, binary serialized ROS messages can be used to increase performance.
@@ -29,6 +27,8 @@ The ROStful server can provide services, topics, and actions that are locally av
 
 ROStful uses the rosbridge JSON mapping by default, but binary serialized ROS messages can be sent with the `Content-Header` set to `application/vnd.ros.msg`. Giving this MIME type in the `Accept` header for queries without input (i.e., publishing topic methods) will cause the server to return serialized messages. Images are also supported.
 
+Supports JSON Web token [jwt](https://jwt.io/introduction/) that defines a compact and self-contained way for securely transmitting information between parties as a JSON object. This information can be verified and trusted because it is digitally signed.
+
 The ROStful client
 ------------------
 The ROStful client is a node that connects to a ROStful web service and makes its services, topics, and actions locally available over ROS.
@@ -43,6 +43,8 @@ The client periodically queries the server for its published topics, and then pu
 The `--binary` option directs the client to use binary serialized messages instead of JSON.
 
 For debugging, the client can be used with the same ROS master as the server. Giving the `--test` option causes the client to append `_ws` to the names of the services/topics/actions it connects to, so they don't conflict with those being used by the server.
+
+The `--jwt` option enables the use of JSON Web Token for secure transmission. Client and Server have to enable this option to work properly. The `--jwt-key` defines the the key to encrypt the transmission in order to verify it.
 
 Web service/component description format
 ========================================

@@ -25,6 +25,8 @@ from .util import ROS_MSG_MIMETYPE, get_query_bool
 
 import time
 
+from .jwt_interface import JwtInterface
+
 class Service:
 	def __init__(self, service_name, service_type):
 		self.name = service_name
@@ -55,7 +57,7 @@ class Service:
 		return self.proxy(*fields)
 
 class Topic:
-	def __init__(self, topic_name, topic_type, allow_pub=True, allow_sub=True, queue_size=1):
+	def __init__(self, topic_name, topic_type, allow_pub=True, allow_sub=True, queue_size=10):
 		self.name = topic_name
 		
 		topic_type_module, topic_type_name = tuple(topic_type.split('/'))
@@ -72,7 +74,7 @@ class Topic:
 		
 		self.pub = None
 		if self.allow_pub:
-			self.pub = rospy.Publisher(self.name, self.rostype)
+			self.pub = rospy.Publisher(self.name, self.rostype, queue_size=10)
 		
 		self.sub = None
 		if self.allow_sub:
@@ -83,13 +85,13 @@ class Topic:
 		return
 	
 	def get(self, num=None):
-		if not self.msg:
+		if not self.msg or len(self.msg) == 0:
 			return None
 		
-		return self.msg[0]
+		return self.msg.popleft()
 	
 	def topic_callback(self, msg):
-		self.msg.appendleft(msg)
+		self.msg.append(msg)
 
 """
 Publications: 
@@ -239,13 +241,19 @@ def response_500(start_response, error, content_type='text/plain'):
 	e_str = '%s: %s' % (str(type(error)), str(error))
 	return response(start_response, '500 Internal Server Error', e_str, content_type)
 
+def response_503(start_response, error, content_type='text/plain'):
+	e_str = '%s: %s' % (str(type(error)), str(error))
+	return response(start_response, '503 Service Unavailable', e_str, content_type)
+
 class RostfulServer:
-	def __init__(self):
+	def __init__(self, use_jwt = False, jwt_key = 'ros', jwt_algorithm = 'HS256'):
 		self.services = {}
 		self.topics = {}
 		self.actions = {}
 		self.base_path = '/'
-	
+		self._use_jwt = use_jwt
+		self.jwt_iface = JwtInterface(key = jwt_key, algorithm = jwt_algorithm)
+		
 	def add_service(self, service_name, ws_name=None, service_type=None):
 		resolved_service_name = rospy.resolve_name(service_name)
 		if service_type is None:
@@ -364,10 +372,13 @@ class RostfulServer:
 		else:
 			jsn = get_query_bool(environ['QUERY_STRING'], 'json')
 		
+		
+		
 		use_ros = environ.get('HTTP_ACCEPT','').find(ROS_MSG_MIMETYPE) != -1
 		
 		suffix = get_suffix(path)
 		# TODO: Figure out what this does
+		#rospy.loginfo('jsn = %s, path = %s, suffix = %s, use_ros=%s', str(jsn),path,suffix,str(use_ros))
 		
 		if path == CONFIG_PATH:
 			dfile = definitions.manifest(self.services, self.topics, self.actions, full=full)
@@ -393,7 +404,9 @@ class RostfulServer:
 					return response_405(start_response)
 				
 				msg = topic.get()
-
+			
+			if msg is None:
+				return response_503(start_response, 'ROS message unavailable')
 			if handler and handler.valid():
 				return handler.get(start_response, msg, **kwargs)
 			elif use_ros:
@@ -402,11 +415,15 @@ class RostfulServer:
 				if msg is not None:
 					msg.serialize(output_data)
 				output_data = output_data.getvalue()
+			elif self._use_jwt:
+				content_type = 'application/jwt'
+				output_data = msgconv.extract_values(msg)
+				output_data = self.jwt_iface.encode(output_data)
 			else:
 				content_type = 'application/json'
-				output_data = msgconv.extract_values(msg) if msg is not None else None
+				output_data = msgconv.extract_values(msg)
 				output_data = json.dumps(output_data)
-			
+			#rospy.loginfo('ret 1: %s, type: %s',output_data, content_type)
 			return response_200(start_response, output_data, content_type=content_type)
 		
 		path = path[:-(len(suffix)+1)]
@@ -504,20 +521,26 @@ class RostfulServer:
 			input_msg = input_msg_type()
 			if use_ros:
 				input_msg.deserialize(input_data)
+			elif self._use_jwt:
+				input_data = self.jwt_iface.decode(input_data)
+				msgconv.populate_instance(input_data, input_msg)
 			else:
 				input_data = json.loads(input_data)
-				input_data.pop('_format', None)
-				msgconv.populate_instance(input_data, input_msg)
+				input_data.pop('_format', None)	
+				msgconv.populate_instance(input_data, input_msg)			
 			
 			ret_msg = None
-			print "passing here !!!"
+
 			if mode == 'service':
 				rospy.logwarn('calling service %s with msg : %s', service.name, input_msg)
 				ret_msg = service.call(input_msg)
 			elif mode == 'topic':
-				rospy.logwarn('publishing %s to topic %s', input_msg, topic.name)
-				topic.publish(input_msg)
-				return response_200(start_response, [], content_type='application/json')
+				if len(input_data) > 0:
+					rospy.logwarn('publishing %s to topic %s', input_msg, topic.name)
+					topic.publish(input_msg)
+					return response_200(start_response, [], content_type='application/json')
+				else:
+					return response_200(start_response, 'error format', content_type='text/plain')
 			elif mode == 'action':
 				rospy.logwarn('publishing %s to action %s', input_msg, action.name)
 				action.publish(action_mode, input_msg)
@@ -538,6 +561,7 @@ class RostfulServer:
 		except Exception, e:
 			print 'An exception occurred!', e
 			return response_500(start_response, e)
+	
 
 import argparse
 from wsgiref.simple_server import make_server
@@ -556,6 +580,8 @@ def servermain():
 	parser.add_argument('--host', default='')
 	parser.add_argument('-p', '--port', type=int, default=8080)
 	parser.add_argument('--base-path', default='/', help='The base path of the http request, usually starting and ending with a "/".')
+	parser.add_argument('--jwt', action='store_true', default=False, help='This argument enables the use of JWT to guarantee a secure transmission')
+	parser.add_argument('--jwt-key', default='ros', help='This arguments sets the key to encode/decode the data')
 	
 	args = parser.parse_args(rospy.myargv()[1:])
 	
@@ -567,7 +593,7 @@ def servermain():
 	time.sleep(init_delay)
 	
 	try:
-		server = RostfulServer()
+		server = RostfulServer(args.jwt, args.jwt_key)
 		
 		server.add_services(args.services)
 		server.add_topics(args.topics)

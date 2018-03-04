@@ -19,6 +19,10 @@ from .util import ROS_MSG_MIMETYPE, ROS_MSG_MIMETYPE_WITH_TYPE, get_json_bool
 
 from collections import namedtuple
 
+from .jwt_interface import JwtInterface
+
+import time
+
 class IndividualServiceProxy:
 	def __init__(self, url, name, srv_module, service_type_name, binary=None):
 		self.url = url
@@ -85,7 +89,11 @@ class IndividualTopicProxy:
 		for thread in cls._publisher_threads:
 			thread.start()
 	
-	def __init__(self, url, name, msg_module, topic_type_name, pub=True, sub=True, publish_interval=None, binary=None):
+	def __init__(self, url, name, msg_module, topic_type_name, pub=True, sub=True, publish_interval=None, binary=None, use_jwt=False, jwt_key='ros'):
+		self._use_jwt = use_jwt
+		
+		self.jwt_iface = JwtInterface(key = jwt_key, algorithm = 'HS256')
+		
 		self.url = url
 		self.name = name
 		
@@ -99,20 +107,31 @@ class IndividualTopicProxy:
 		self.publish_interval = publish_interval or 1
 		self.publisher = None
 		if self.pub:
-			self.publisher = rospy.Publisher(name, self.rostype)
+			rospy.logwarn('IndividualTopicProxy::__init__: publishing to %s from remote %s',name,self.url)
+			self.publisher = rospy.Publisher(name, self.rostype, queue_size = 10)
 			self.publisher_thread = threading.Thread(target=self.publish, name=name)
 			self._publisher_threads.append(self.publisher_thread)
 		
 		self.subscriber = None
 		if self.sub:
+			if self.pub:
+				name += '_out'
+			rospy.logwarn('IndividualTopicProxy::__init__: subscribing to %s and sending to remote %s',name,self.url)
 			self.subscriber = rospy.Subscriber(name, self.rostype, self.callback)
+		
 	
 	def callback(self, msg):
+		#rospy.loginfo('IndividualTopicProxy::callback')
+		
 		if self.binary:
 			req = StringIO()
 			msg.serialize(req)
 			reqs = req.getvalue()
 			content_type = ROS_MSG_MIMETYPE_WITH_TYPE(self.rostype)
+		elif self._use_jwt:
+			req = msgconv.extract_values(msg)
+			reqs = self.jwt_iface.encode(req)
+			content_type = 'application/jwt'			
 		else:
 			req = msgconv.extract_values(msg)
 			req['_format'] = 'ros'
@@ -123,9 +142,9 @@ class IndividualTopicProxy:
 		try:
 			wsres = urllib2.urlopen(wsreq)
 		except Exception, e:
-			print content_type
-			print reqs
-			raise e
+			rospy.logerr('IndividualTopicProxy::callback: Exception: %s. Content type: %s, reqs: %s',e,content_type,reqs)
+			return
+			#raise e
 		
 		if wsres.getcode() != 200:
 			#TODO: flip out
@@ -134,52 +153,66 @@ class IndividualTopicProxy:
 	def publish(self):
 		stop = False
 		while not (stop or rospy.is_shutdown()):
+			
 			if self.binary:
 				content_accept = ROS_MSG_MIMETYPE
+			elif self._use_jwt:
+				content_accept = 'application/jwt'
 			else:
 				content_accept = 'application/json'
 			
 			wsreq = urllib2.Request(self.url, headers={'Accept': content_accept})
+			ret_code = 0
 			try:
-				wsres = urllib2.urlopen(wsreq)
+				wsres = urllib2.urlopen(wsreq)	
+				ret_code = wsres.getcode()
 			except Exception, e:
-				sys.stderr.write("Encountered an error while retrieving a message on topic %s: %s\n" % (self.name, str(e)))
-				stop = True
-				break
+				rospy.logerr("IndividualTopicProxy::publish:Encountered an error while retrieving a message on topic %s: %s\n" % (self.name, str(e)))
 			
-			if wsres.getcode() != 200:
-				#TODO: flip out
-				pass
-			
-			data_str = wsres.read()
-			
-			msg = self.rostype()
-			if wsres.info()['Content-Type'].split(';')[0].strip() == ROS_MSG_MIMETYPE:
-				if not data_str:
-					msg = None
+			if ret_code == 200:
+					
+				data_str = wsres.read()
+				
+				msg = self.rostype()
+				if wsres.info()['Content-Type'].split(';')[0].strip() == ROS_MSG_MIMETYPE:
+					if not data_str:
+						msg = None
+					else:
+						msg.deserialize(data_str)
+				elif wsres.info()['Content-Type'].split(';')[0].strip() == 'application/jwt':
+					if len(data_str.strip()) > 0:
+						data = self.jwt_iface.decode(data_str.strip())
+						if not data:
+							msg = None
+						else:
+							data.pop('_format', None)
+							msgconv.populate_instance(data, msg)
+					else:
+						msg = None
 				else:
-					msg.deserialize(data_str)
-			else:
-				data = json.loads(data_str.strip())
-				if not data:
-					msg = None
-				else:
-					data.pop('_format', None)
-					msgconv.populate_instance(data, msg)
-			
-			if msg is not None:
-				self.publisher.publish(msg)
+					data = json.loads(data_str.strip())
+					if not data:
+						msg = None
+					else:
+						data.pop('_format', None)
+						msgconv.populate_instance(data, msg)
+				
+				if msg is not None:
+					self.publisher.publish(msg)
 			rospy.sleep(self.publish_interval)
+				
 
-def create_topic_proxy(url, name, topic_type, pub=True, sub=True, publish_interval=None, binary=None):
+def create_topic_proxy(url, name, topic_type, pub=True, sub=True, publish_interval=None, binary=None, use_jwt=False, jwt_key='ros'):
 	try:
 		topic_type_module, topic_type_name = tuple(topic_type.split('/'))
+		rospy.loginfo('create_topic_proxy: module = %s, name = %s, pub = %s, sub = %s', topic_type_module, topic_type_name, str(pub), str(sub))
 		roslib.load_manifest(topic_type_module)
 		msg_module = import_module(topic_type_module + '.msg')
+		
 		return IndividualTopicProxy(url, name, msg_module, topic_type_name, 
-								pub=pub, sub=sub, publish_interval=publish_interval, binary=binary)
+								pub=pub, sub=sub, publish_interval=publish_interval, binary=binary, use_jwt=use_jwt, jwt_key=jwt_key)
 	except Exception, e:
-		print "Unknown msg type %s" % topic_type
+		rospy.logerr("create_topic_proxy: Unknown msg type %s for topic %s" %(topic_type, name))
 		return None
 
 def create_action_proxies(url, name, action_type, publish_interval=None, binary=None):
@@ -203,11 +236,11 @@ def create_action_proxies(url, name, action_type, publish_interval=None, binary=
 		return None
 
 class RostfulServiceProxy:
-	def __init__(self, url, remap=False, subscribe=False, publish_interval=None, binary=None, prefix=None):
+	def __init__(self, url, remap=False, subscribe=False, publish_interval=None, binary=None, prefix=None, use_jwt=False, jwt_key='ros'):
 		if url.endswith('/'):
 			url = url[:-1]
 		self.url = url
-		
+
 		self.binary = binary
 		
 		self.prefix=prefix
@@ -223,20 +256,26 @@ class RostfulServiceProxy:
 		
 		req = urllib2.Request(config_url)
 		
-		try:
-			res = urllib2.urlopen(req)
-		except Exception, e:
-			#TODO: flip out
-			raise e
+		stop = False
 		
-		if res.getcode() != 200:
-			#TODO: flip out
-			pass
+		# Waiting for servver
+		while not (stop or rospy.is_shutdown()):
+			try:
+				res = urllib2.urlopen(req)
+				if res.getcode() == 200:
+					stop = True
+			except Exception, e:
+				rospy.loginfo('RostfulServiceProxy::__init__: waiting for url %s', self.url)
+				time.sleep(2)
+		
+		
 		
 		parser = deffile.DefFileParser()
 		parser.add_default_section_parser(deffile.INISectionParser)
 		
 		dfile = parser.parse(res.read().strip())
+		
+		print dfile
 		
 		if dfile.type == 'Node':
 			if self.prefix is None:
@@ -257,19 +296,26 @@ class RostfulServiceProxy:
 			
 			topic_section = dfile.get_section('Topics')
 			if topic_section:
+				print 'Topic section'
 				for topic_name, topic_type in topic_section.iteritems():
 					topic_dict[topic_name] = topic_info(type=topic_type, pub=True, sub=subscribe)
+			
 			published_section = dfile.get_section('Publishes')
 			if published_section:
+				print 'Published section'
 				for topic_name, topic_type in published_section.iteritems():
 					sub = topic_dict[topic_name].sub if topic_dict.has_key(topic_name) else False
-				topic_dict[topic_name] = topic_info(type=topic_type, pub=True, sub=sub)
+					topic_dict[topic_name] = topic_info(type=topic_type, pub=True, sub=sub)
+					print '%s-%s'%(topic_name,str(topic_dict[topic_name]))
+			
 			subscribed_section = dfile.get_section('Subscribes')
 			if subscribed_section:
+				print 'Subscribed section'
 				for topic_name, topic_type in subscribed_section.iteritems():
 					pub = topic_dict[topic_name].pub if topic_dict.has_key(topic_name) else False
-				topic_dict[topic_name] = topic_info(type=topic_type, pub=pub, sub=subscribe)
-			
+					topic_dict[topic_name] = topic_info(type=topic_type, pub=pub, sub=subscribe)
+					print '%s-%s'%(topic_name,str(topic_dict[topic_name]))
+				
 			topics = {}
 			published_topics = {}
 			subscribed_topics = {}
@@ -282,21 +328,21 @@ class RostfulServiceProxy:
 					subscribed_topics[topic_name] = info.type
 			
 			if topics:
-				print 'Publishing and subscribing:'
+				rospy.loginfo('rostful_client::RostfulServiceProxy: Publishing and subscribing')
 				for topic_name, topic_type in topics.iteritems():
-					ret = self.setup_topic(self.url + '/' + topic_name, prefix + topic_name, topic_type, pub=True, sub=True, remap=remap, publish_interval=publish_interval)
+					ret = self.setup_topic(self.url + '/' + topic_name, prefix + topic_name, topic_type, pub=True, sub=True, remap=remap, publish_interval=publish_interval, use_jwt=use_jwt, jwt_key=jwt_key)
 					if ret: print '  %s (%s)' % (prefix + topic_name, topic_type)
 			
 			if published_topics:
-				print 'Publishing:'
+				rospy.loginfo('rostful_client::RostfulServiceProxy: Publishing')
 				for topic_name, topic_type in published_topics.iteritems():
-					ret = self.setup_topic(self.url + '/' + topic_name, prefix + topic_name, topic_type, pub=True, remap=remap, publish_interval=publish_interval)
+					ret = self.setup_topic(self.url + '/' + topic_name, prefix + topic_name, topic_type, pub=True, remap=remap, publish_interval=publish_interval, use_jwt=use_jwt, jwt_key=jwt_key)
 					if ret: print '  %s (%s)' % (prefix + topic_name, topic_type)
 			
 			if subscribed_topics:
-				print 'Subscribing:'
+				rospy.loginfo('rostful_client::RostfulServiceProxy: Subscribing')
 				for topic_name, topic_type in subscribed_topics.iteritems():
-					ret = self.setup_topic(self.url + '/' + topic_name, prefix + topic_name, topic_type, pub=False, sub=True, remap=remap, publish_interval=publish_interval)
+					ret = self.setup_topic(self.url + '/' + topic_name, prefix + topic_name, topic_type, pub=False, sub=True, remap=remap, publish_interval=publish_interval, use_jwt=use_jwt, jwt_key=jwt_key)
 					if ret: print '  %s (%s)' % (prefix + topic_name, topic_type)
 			
 			actions = dfile.get_section('Actions')
@@ -311,7 +357,7 @@ class RostfulServiceProxy:
 		elif dfile.type == 'Topic':
 			pub = dfile.manifest['Subscribes'].lower() == 'true'
 			sub = dfile.manifest['Publishes'].lower() == 'true' and subscribe
-			ret = self.setup_topic(self.url, dfile.manifest['Name'], dfile.manifest['Type'], pub=pub, sub=sub, remap=remap, publish_interval=publish_interval)
+			ret = self.setup_topic(self.url, dfile.manifest['Name'], dfile.manifest['Type'], pub=pub, sub=sub, remap=remap, publish_interval=publish_interval, use_jwt=use_jwt, jwt_key=jwt_key)
 			if ret: print 'Connected to topic %s (%s)' % (dfile.manifest['Name'], dfile.manifest['Type'])
 		elif dfile.type == 'Action':
 			ret = self.setup_action(self.url, dfile.manifest['Name'], dfile.manifest['Type'], remap=remap, publish_interval=publish_interval)
@@ -329,15 +375,16 @@ class RostfulServiceProxy:
 		self.services[service_name] = proxy
 		return True
 	
-	def setup_topic(self, topic_url, topic_name, topic_type, pub=None, sub=None, remap=False, publish_interval=None):
+	def setup_topic(self, topic_url, topic_name, topic_type, pub=None, sub=None, remap=False, publish_interval=None, use_jwt = False, jwt_key = 'ros'):
 		if remap:
 			topic_name = topic_name + '_ws'
 		
-		if pub is None and sub is None:
+		if pub is None:
 			pub = True
+		if sub is None:
 			sub = True
 		
-		proxy = create_topic_proxy(topic_url, topic_name, topic_type, pub=pub, sub=sub, publish_interval=publish_interval, binary=self.binary)
+		proxy = create_topic_proxy(topic_url, topic_name, topic_type, pub=pub, sub=sub, publish_interval=publish_interval, binary=self.binary, use_jwt = use_jwt, jwt_key = jwt_key)
 		if proxy is None: return False
 		self.topics[topic_name] = proxy
 		return True
@@ -367,6 +414,8 @@ def clientmain():
 	parser.add_argument('--binary', action='store_true', default=False, help='Using serialized ROS messages instead of rosbridge JSON.')
 	
 	parser.add_argument('--test', action='store_true', default=False, help='Use if server and client are using the same ROS master for testing. Client service and topic names will have _ws appended.')
+	parser.add_argument('--jwt', action='store_true', default=False, help='This argument enables the use of JWT to guarantee a secure transmission')
+	parser.add_argument('--jwt-key', default='ros', help='This arguments sets the key to encode/decode the data')
 	
 	grp = parser.add_mutually_exclusive_group()
 	grp.add_argument('--prefix', help='Specify a prefix for the service and topic names. By default, this is the name given by the web service if it provides one.')
@@ -377,6 +426,6 @@ def clientmain():
 	if not args.url.startswith('http'):
 		args.url = 'http://' + args.url
 	
-	proxy = RostfulServiceProxy(args.url, remap=args.test, subscribe=args.subscribe, publish_interval = args.publish_interval, binary=args.binary, prefix=args.prefix)
+	proxy = RostfulServiceProxy(args.url, remap=args.test, subscribe=args.subscribe, publish_interval = args.publish_interval, binary=args.binary, prefix=args.prefix, use_jwt=args.jwt, jwt_key=args.jwt_key)
 	
 	rospy.spin()
