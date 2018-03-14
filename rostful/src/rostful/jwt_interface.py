@@ -42,10 +42,10 @@ class JwtInterface:
 		try:
 			decoded = jwt.decode(msg, self.key, algorithm=self.algorithm)
 		except jwt.exceptions.InvalidTokenError,e:
-			rospy.logerr('JwtInterface::decode: %s. key = %s, algorithm = %s',e, self.key, self.algorithm)
+			rospy.logerr('JwtInterface::decode:InvalidTokenError: %s. key = %s, algorithm = %s, msg = %s',e, self.key, self.algorithm, msg)
 		except jwt.exceptions.DecodeError,e:
-			rospy.logerr('JwtInterface::decode: %s. key = %s, algorithm = %s',e, self.key, self.algorithm)
+			rospy.logerr('JwtInterface::decode:DecodeError: %s. key = %s, algorithm = %s, msg = %s',e, self.key, self.algorithm, msg)
 		except TypeError,e:
-			rospy.logerr('JwtInterface::decode: %s. key = %s, algorithm = %s',e, self.key, self.algorithm)
+			rospy.logerr('JwtInterface::decode:TypeError: %s. key = %s, algorithm = %s, msg = %s',e, self.key, self.algorithm, msg)
 			
 		return decoded

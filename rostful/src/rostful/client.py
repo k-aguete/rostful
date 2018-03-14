@@ -24,7 +24,11 @@ from .jwt_interface import JwtInterface
 import time
 
 class IndividualServiceProxy:
-	def __init__(self, url, name, srv_module, service_type_name, binary=None):
+	def __init__(self, url, name, srv_module, service_type_name, binary=None, use_jwt=False, jwt_key='ros'):
+		self._use_jwt = use_jwt
+		
+		self.jwt_iface = JwtInterface(key = jwt_key, algorithm = 'HS256')
+		
 		self.url = url
 		self.name = name
 		
@@ -35,6 +39,8 @@ class IndividualServiceProxy:
 		self.rostype_resp = getattr(srv_module, service_type_name + 'Response')
 		
 		self.proxy = rospy.Service(self.name, self.rostype, self.call)
+		rospy.logwarn('IndividualServiceProxy::__init__: listening to %s and sending to remote %s',name,self.url)
+
 	
 	def call(self, rosreq):
 		if self.binary:
@@ -42,6 +48,12 @@ class IndividualServiceProxy:
 			rosreq.serialize(req)
 			reqs = req.getvalue()
 			content_type = ROS_MSG_MIMETYPE_WITH_TYPE(self.rostype_req)
+		elif self._use_jwt:
+			req = msgconv.extract_values(rosreq)
+			req['_format'] = 'ros'
+			reqs = self.jwt_iface.encode(req)
+			content_type = 'application/jwt'
+			
 		else:
 			req = msgconv.extract_values(rosreq)
 			req['_format'] = 'ros'
@@ -49,20 +61,26 @@ class IndividualServiceProxy:
 			content_type = 'application/json'
 		
 		wsreq = urllib2.Request(self.url.encode('utf-8'), data=reqs, headers={'Content-Type': content_type})
+		rosresp = self.rostype_resp()
+		
 		try:
 			wsres = urllib2.urlopen(wsreq)
 		except Exception, e:
-			raise e
+			rospy.logerr('IndividualServiceProxy::callback: %s.  Exception: %s. Content type: %s, reqs: %s',self.name,e,content_type,reqs)
+			return rosresp
 		
 		if wsres.getcode() != 200:
 			#TODO: flip out
-			pass
+			return rosresp
 		
 		data_str = wsres.read().strip()
 		
-		rosresp = self.rostype_resp()
 		if wsres.info()['Content-Type'].split(';')[0].strip() == ROS_MSG_MIMETYPE:
 			rosresp.deserialize(data_str)
+		elif wsres.info()['Content-Type'].split(';')[0].strip() == 'application/jwt':
+			data = self.jwt_iface.decode(data_str)
+			data.pop('_format', None)
+			msgconv.populate_instance(data, rosresp)
 		else:
 			data = json.loads(data_str)
 			data.pop('_format', None)
@@ -70,12 +88,12 @@ class IndividualServiceProxy:
 		
 		return rosresp
 
-def create_service_proxy(url, name, service_type, binary=None):
+def create_service_proxy(url, name, service_type, binary=None,use_jwt=False, jwt_key='ros'):
 	try:
 		service_type_module, service_type_name = tuple(service_type.split('/'))
 		roslib.load_manifest(service_type_module)
 		srv_module = import_module(service_type_module + '.srv')
-		return IndividualServiceProxy(url, name, srv_module, service_type_name, binary=binary)
+		return IndividualServiceProxy(url, name, srv_module, service_type_name, binary=binary, use_jwt=use_jwt, jwt_key=jwt_key)
 	except Exception, e:
 		print "Unknown service type %s" % service_type
 		return None
@@ -288,7 +306,7 @@ class RostfulServiceProxy:
 			if services:
 				print 'Services:'
 				for service_name, service_type in services.iteritems():
-					ret = self.setup_service(self.url + '/' + service_name, prefix + service_name, service_type, remap=remap)
+					ret = self.setup_service(self.url + '/' + service_name, prefix + service_name, service_type, remap=remap, use_jwt=use_jwt, jwt_key=jwt_key)
 					if ret: print '  %s (%s)' % (prefix + service_name, service_type)
 			
 			topic_dict = {}
@@ -366,11 +384,11 @@ class RostfulServiceProxy:
 		IndividualTopicProxy.start()
 		return
 	
-	def setup_service(self, service_url, service_name, service_type, remap=False):
+	def setup_service(self, service_url, service_name, service_type, remap=False, use_jwt = False, jwt_key = 'ros'):
 		if remap:
 			service_name = service_name + '_ws'
 		
-		proxy = create_service_proxy(service_url, service_name, service_type, binary=self.binary)
+		proxy = create_service_proxy(service_url, service_name, service_type, binary=self.binary, use_jwt = use_jwt, jwt_key = jwt_key)
 		if proxy is None: return False
 		self.services[service_name] = proxy
 		return True

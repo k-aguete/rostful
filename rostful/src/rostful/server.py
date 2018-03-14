@@ -523,6 +523,7 @@ class RostfulServer:
 				input_msg.deserialize(input_data)
 			elif self._use_jwt:
 				input_data = self.jwt_iface.decode(input_data)
+				input_data.pop('_format', None)	
 				msgconv.populate_instance(input_data, input_msg)
 			else:
 				input_data = json.loads(input_data)
@@ -532,17 +533,17 @@ class RostfulServer:
 			ret_msg = None
 
 			if mode == 'service':
-				rospy.logwarn('calling service %s with msg : %s', service.name, input_msg)
+				rospy.logwarn('RostfulServer::_handle_post: calling service %s with msg : %s', service.name, input_msg)
 				ret_msg = service.call(input_msg)
 			elif mode == 'topic':
 				if len(input_data) > 0:
-					rospy.logwarn('publishing %s to topic %s', input_msg, topic.name)
+					rospy.logwarn('RostfulServer::_handle_post: publishing %s to topic %s', input_msg, topic.name)
 					topic.publish(input_msg)
 					return response_200(start_response, [], content_type='application/json')
 				else:
 					return response_200(start_response, 'error format', content_type='text/plain')
 			elif mode == 'action':
-				rospy.logwarn('publishing %s to action %s', input_msg, action.name)
+				rospy.logwarn('RostfulServer::_handle_post: publishing %s to action %s', input_msg, action.name)
 				action.publish(action_mode, input_msg)
 				return response_200(start_response, [], content_type='application/json')
 			
@@ -551,6 +552,11 @@ class RostfulServer:
 				output_data = StringIO()
 				ret_msg.serialize(output_data)
 				output_data = output_data.getvalue()
+			elif self._use_jwt:
+				output_data = msgconv.extract_values(ret_msg)
+				output_data['_format'] = 'ros'
+				output_data = self.jwt_iface.encode(output_data)
+				content_type = 'application/jwt'
 			else:
 				output_data = msgconv.extract_values(ret_msg)
 				output_data['_format'] = 'ros'
