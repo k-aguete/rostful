@@ -11,7 +11,7 @@
   -->
   <node pkg="rostful" type="server" name="rostful_server" 
 output="screen"
-	args="--jwt --host $(arg host) -p $(arg port) --topics /hello /bye --services /fake_node/service"/>
+	args="--host $(arg host) -p $(arg port) --topics /hello /bye --services /fake_node/service --actions /fake_node/wait "/>
 
 </launch>
 

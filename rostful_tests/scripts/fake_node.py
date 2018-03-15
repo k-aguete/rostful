@@ -39,6 +39,10 @@ import time, threading
 from robotnik_msgs.msg import State
 from std_srvs.srv import Trigger, SetBool
 
+import actionlib
+
+import rostful_tests.msg
+
 DEFAULT_FREQ = 100.0
 MAX_FREQ = 500.0
 
@@ -75,9 +79,15 @@ class FakeNode:
 		# Timer to publish state
 		self.publish_state_timer = 1
 		
+		self._action_feedback = rostful_tests.msg.WaitFeedback()
+		self._action_result = rostful_tests.msg.WaitResult()
+		self._action_goal = rostful_tests.msg.WaitActionGoal()
+		self._action_init_time = rospy.Time.now()
 		
 		self.t_publish_state = threading.Timer(self.publish_state_timer, self.publishROSstate)
 		
+		self._action_name = rospy.get_name()+'/wait'
+        
 			
 	def setup(self):
 		'''
@@ -107,6 +117,9 @@ class FakeNode:
 		# self.service_client = rospy.ServiceProxy('service_name', ServiceMsg)
 		# ret = self.service_client.call(ServiceMsg)
 		
+		self._as = actionlib.SimpleActionServer(self._action_name, rostful_tests.msg.WaitAction, execute_cb=self.executeActionCb, auto_start = False)
+		self._as.start()
+        
 		self.ros_initialized = True
 		
 		self.publishROSstate()
@@ -382,6 +395,31 @@ class FakeNode:
 		
 		return True,'ok'	
 
+	def executeActionCb(self, goal):
+		
+		if goal.seconds < 0:
+			goal.seconds = 0
+			 
+		self._action_result.ret = False
+		self._action_goal = goal
+		self._action_feedback.remaining_seconds = goal.seconds
+		self._action_init_time = rospy.Time.now()
+		
+		# publish info to the console for the user
+		rospy.loginfo('%s: executeActionCb: wait for %d seconds' % (self._action_name, self._action_goal.seconds))
+		
+		while self._action_feedback.remaining_seconds != 0:
+			t_now = rospy.Time.now()
+			t_diff = (t_now - self._action_init_time).to_sec()
+			
+			self._action_feedback.remaining_seconds =  goal.seconds - int(t_diff)
+			self._as.publish_feedback(self._action_feedback)
+			#rospy.loginfo('%s:executeActionCb: remaining time = %d',self._action_name,self._action_feedback.remaining_seconds)
+			time.sleep(0.1)
+		
+		self._action_result.ret = True
+		rospy.loginfo('%s:executeActionCb: Succeeded' % self._action_name)
+		self._as.set_succeeded(self._action_result)
 		
 def main():
 
