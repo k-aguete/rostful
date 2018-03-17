@@ -4,7 +4,7 @@
   <!--  -->
   <node pkg="rostful" type="client" name="rostful_client" 
 output="screen"
-	args="--test --publish-interval 1 --prefix test $(arg url)"/>
+	args="--jwt --test --publish-interval 1 --prefix test $(arg url)"/>
 
 </launch>
 

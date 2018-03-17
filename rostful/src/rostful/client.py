@@ -233,7 +233,7 @@ def create_topic_proxy(url, name, topic_type, pub=True, sub=True, publish_interv
 		rospy.logerr("create_topic_proxy: Unknown msg type %s for topic %s" %(topic_type, name))
 		return None
 
-def create_action_proxies(url, name, action_type, publish_interval=None, binary=None):
+def create_action_proxies(url, name, action_type, publish_interval=None, binary=None, use_jwt = False, jwt_key = 'ros'):
 	try:
 		action_type_module, action_type_name = tuple(action_type.split('/'))
 		roslib.load_manifest(action_type_module)
@@ -241,16 +241,16 @@ def create_action_proxies(url, name, action_type, publish_interval=None, binary=
 		
 		proxies = {}
 		
-		proxies['status'] = IndividualTopicProxy(url + '/status', name + '/status', actionlib_msgs.msg, 'GoalStatusArray', pub=True, sub=False, publish_interval=publish_interval, binary=binary)
-		proxies['result'] = IndividualTopicProxy(url + '/result', name + '/result', msg_module, action_type_name + 'ActionResult', pub=True, sub=False, publish_interval=publish_interval, binary=binary)
-		proxies['feedback'] = IndividualTopicProxy(url + '/feedback', name + '/feedback', msg_module, action_type_name + 'ActionFeedback', pub=True, sub=False, publish_interval=publish_interval, binary=binary)
+		proxies['status'] = IndividualTopicProxy(url + '/status', name + '/status', actionlib_msgs.msg, 'GoalStatusArray', pub=True, sub=False, publish_interval=publish_interval, binary=binary, use_jwt = use_jwt, jwt_key = jwt_key)
+		proxies['result'] = IndividualTopicProxy(url + '/result', name + '/result', msg_module, action_type_name + 'ActionResult', pub=True, sub=False, publish_interval=publish_interval, binary=binary, use_jwt = use_jwt, jwt_key = jwt_key)
+		proxies['feedback'] = IndividualTopicProxy(url + '/feedback', name + '/feedback', msg_module, action_type_name + 'ActionFeedback', pub=True, sub=False, publish_interval=publish_interval, binary=binary, use_jwt = use_jwt, jwt_key = jwt_key)
 		
-		proxies['goal'] = IndividualTopicProxy(url + '/goal', name + '/goal', msg_module, action_type_name + 'ActionGoal', pub=False, sub=True, binary=binary)
-		proxies['cancel'] = IndividualTopicProxy(url + '/cancel', name + '/cancel', actionlib_msgs.msg, 'GoalID', pub=False, sub=True, binary=binary)
+		proxies['goal'] = IndividualTopicProxy(url + '/goal', name + '/goal', msg_module, action_type_name + 'ActionGoal', pub=False, sub=True, binary=binary, use_jwt = use_jwt, jwt_key = jwt_key)
+		proxies['cancel'] = IndividualTopicProxy(url + '/cancel', name + '/cancel', actionlib_msgs.msg, 'GoalID', pub=False, sub=True, binary=binary, use_jwt = use_jwt, jwt_key = jwt_key)
 
 		return proxies
 	except Exception, e:
-		print "Unknown action type %s" % action_type
+		rospy.logerr("create_action_proxies: Unknown action type %s" , action_type)
 		return None
 
 class RostfulServiceProxy:
@@ -367,7 +367,7 @@ class RostfulServiceProxy:
 			if actions:
 				print 'Actions:'
 				for action_name, action_type in actions.iteritems():
-					ret = self.setup_action(self.url + '/' + action_name, prefix + action_name, action_type, remap=remap, publish_interval=publish_interval)
+					ret = self.setup_action(self.url + '/' + action_name, prefix + action_name, action_type, remap=remap, publish_interval=publish_interval, use_jwt=use_jwt, jwt_key=jwt_key)
 					if ret: print '  %s (%s)' % (prefix + action_name, action_type)
 		elif dfile.type == 'Service':
 			ret = self.setup_service(self.url, dfile.manifest['Name'], dfile.manifest['Type'], remap=remap)
@@ -407,11 +407,11 @@ class RostfulServiceProxy:
 		self.topics[topic_name] = proxy
 		return True
 	
-	def setup_action(self, action_url, action_name, action_type, remap=False, publish_interval=None):
+	def setup_action(self, action_url, action_name, action_type, remap=False, publish_interval=None, use_jwt = False, jwt_key = 'ros'):
 		if remap:
 			action_name = action_name + '_ws'
 		
-		proxy = create_action_proxies(action_url, action_name, action_type, publish_interval=publish_interval, binary=self.binary)
+		proxy = create_action_proxies(action_url, action_name, action_type, publish_interval=publish_interval, binary=self.binary, use_jwt = use_jwt, jwt_key = jwt_key)
 		if proxy is None: return False
 		self.actions[action_name] = proxy
 		return True

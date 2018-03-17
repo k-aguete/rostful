@@ -142,8 +142,8 @@ class Action:
 		self.feedback_msg = deque([], queue_size)
 		self.feedback_sub = rospy.Subscriber(self.name + '/' +self.FEEDBACK_SUFFIX, self.rostype_action_feedback, self.feedback_callback)
 		
-		self.goal_pub = rospy.Publisher(self.name + '/' + self.GOAL_SUFFIX, self.rostype_action_goal)
-		self.cancel_pub = rospy.Publisher(self.name + '/' +self.CANCEL_SUFFIX, actionlib_msgs.msg.GoalID)
+		self.goal_pub = rospy.Publisher(self.name + '/' + self.GOAL_SUFFIX, self.rostype_action_goal, queue_size = 10)
+		self.cancel_pub = rospy.Publisher(self.name + '/' +self.CANCEL_SUFFIX, actionlib_msgs.msg.GoalID, queue_size = 10)
 	
 	def get_msg_type(self, suffix):
 		if suffix == self.STATUS_SUFFIX:
@@ -259,7 +259,7 @@ class RostfulServer:
 		if service_type is None:
 			service_type = rosservice.get_service_type(resolved_service_name)
 			if not service_type:
-				print 'Unknown service %s' % service_name
+				rospy.logerr('RostfulServer:add_service: Unknown service %s',service_name)
 				return False
 		
 		if ws_name is None:
@@ -519,12 +519,14 @@ class RostfulServer:
 			input_data = environ['wsgi.input'].read(length)
 			
 			input_msg = input_msg_type()
+			content_type = 'application/json'
 			if use_ros:
 				input_msg.deserialize(input_data)
 			elif self._use_jwt:
 				input_data = self.jwt_iface.decode(input_data)
 				input_data.pop('_format', None)	
 				msgconv.populate_instance(input_data, input_msg)
+				content_type = 'application/jwt'
 			else:
 				input_data = json.loads(input_data)
 				input_data.pop('_format', None)	
@@ -532,20 +534,20 @@ class RostfulServer:
 			
 			ret_msg = None
 
-			if mode == 'service':
-				rospy.logwarn('RostfulServer::_handle_post: calling service %s with msg : %s', service.name, input_msg)
-				ret_msg = service.call(input_msg)
-			elif mode == 'topic':
-				if len(input_data) > 0:
-					rospy.logwarn('RostfulServer::_handle_post: publishing %s to topic %s', input_msg, topic.name)
+			if len(input_data) > 0:	
+				if mode == 'service':
+					rospy.logwarn('RostfulServer::_handle_post: calling service %s with msg : %s', service.name, input_msg)
+					ret_msg = service.call(input_msg)
+				elif mode == 'topic':				
+					rospy.logwarn('RostfulServer::_handle_post: publishing -> %s to topic %s', input_msg, topic.name)
 					topic.publish(input_msg)
-					return response_200(start_response, [], content_type='application/json')
-				else:
-					return response_200(start_response, 'error format', content_type='text/plain')
-			elif mode == 'action':
-				rospy.logwarn('RostfulServer::_handle_post: publishing %s to action %s', input_msg, action.name)
-				action.publish(action_mode, input_msg)
-				return response_200(start_response, [], content_type='application/json')
+					return response_200(start_response, [], content_type=content_type)
+				elif mode == 'action':
+					rospy.logwarn('RostfulServer::_handle_post: publishing %s to action %s', input_msg, action.name)
+					action.publish(action_mode, input_msg)
+					return response_200(start_response, [], content_type=content_type)
+			else:
+				return response_405(start_response, 'error format', content_type='text/plain')
 			
 			if use_ros:
 				content_type = ROS_MSG_MIMETYPE
