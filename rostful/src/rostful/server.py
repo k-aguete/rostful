@@ -23,9 +23,11 @@ from . import deffile, definitions
 
 from .util import ROS_MSG_MIMETYPE, get_query_bool
 
-import time
+import time, threading
 
 from .jwt_interface import JwtInterface
+
+TOPIC_SUBSCRIBER_TIMEOUT=5.0
 
 class Service:
 	def __init__(self, service_name, service_type):
@@ -80,6 +82,8 @@ class Topic:
 		if self.allow_sub:
 			self.sub = rospy.Subscriber(self.name, self.rostype, self.topic_callback)
 	
+		self._last_msg_time = rospy.Time(0)
+		
 	def publish(self, msg):
 		self.pub.publish(msg)
 		return
@@ -92,6 +96,13 @@ class Topic:
 	
 	def topic_callback(self, msg):
 		self.msg.append(msg)
+		self._last_msg_time = rospy.Time.now()
+		
+	def is_active(self):
+		'''
+			Returns true if the topic is receiving messages
+		'''
+		return (rospy.Time.now() - self._last_msg_time ).to_sec() <= TOPIC_SUBSCRIBER_TIMEOUT
 
 """
 Publications: 
@@ -246,13 +257,18 @@ def response_503(start_response, error, content_type='text/plain'):
 	return response(start_response, '503 Service Unavailable', e_str, content_type)
 
 class RostfulServer:
-	def __init__(self, use_jwt = False, jwt_key = 'ros', jwt_algorithm = 'HS256'):
+	def __init__(self, args):
 		self.services = {}
 		self.topics = {}
 		self.actions = {}
 		self.base_path = '/'
-		self._use_jwt = use_jwt
-		self.jwt_iface = JwtInterface(key = jwt_key, algorithm = jwt_algorithm)
+		self._use_jwt = args.jwt
+		self.jwt_iface = JwtInterface(key = args.jwt_key, algorithm = args.jwt_alg)
+		self.ros_setup_timer = 10
+		self.args = args
+		self.base_path = args.base_path
+		
+		self.rosSetup()
 		
 	def add_service(self, service_name, ws_name=None, service_type=None):
 		resolved_service_name = rospy.resolve_name(service_name)
@@ -273,17 +289,20 @@ class RostfulServer:
 	def add_services(self, service_names):
 		if not service_names:
 			return
-		print "Adding services:"
+		#print "Adding services:"
 		for service_name in service_names:
-			ret = self.add_service(service_name)
-			if ret: print '  ' + service_name
+			if service_name.startswith('/'):
+				service_name = service_name[1:]
+			if not self.services.has_key(service_name):
+				ret = self.add_service(service_name)
+				if ret: rospy.loginfo('RostfulServer::add_services: added %s', service_name)
 	
 	def add_topic(self, topic_name, ws_name=None, topic_type=None, allow_pub=True, allow_sub=True):
 		resolved_topic_name = rospy.resolve_name(topic_name)
 		if topic_type is None:
 			topic_type, _, _ = rostopic.get_topic_type(resolved_topic_name)
 			if not topic_type:
-				print 'Unknown topic %s' % topic_name
+				rospy.logerr('RostfulServer: add_topic: Unknown topic %s', topic_name)
 				return False
 		
 		if ws_name is None:
@@ -297,23 +316,27 @@ class RostfulServer:
 	def add_topics(self, topic_names, allow_pub=True, allow_sub=True):
 		if not topic_names:
 			return
-		if allow_pub and allow_sub:
+		'''if allow_pub and allow_sub:
 			print "Publishing and subscribing to topics:"
 		elif allow_sub:
 			print "Publishing topics:"
 		elif allow_pub:
 			print "Subscribing to topics"
+		'''
 		for topic_name in topic_names:
-			ret = self.add_topic(topic_name, allow_pub=allow_pub, allow_sub=allow_sub)
-			if ret:
-				print '  ' + topic_name
+			if topic_name.startswith('/'):
+				topic_name = topic_name[1:]
+			if not self.topics.has_key(topic_name):
+				ret = self.add_topic(topic_name, allow_pub=allow_pub, allow_sub=allow_sub)
+				if ret:
+					rospy.loginfo('RostfulServer::add_topics: added topic %s' ,topic_name)
 	
 	def add_action(self, action_name, ws_name=None, action_type=None):
 		if action_type is None:
 			resolved_topic_name = rospy.resolve_name(action_name + '/result')
 			topic_type, _, _ = rostopic.get_topic_type(resolved_topic_name)
 			if not topic_type:
-				print 'Unknown action %s' % action_name
+				rospy.logerr('RostfulServer::add_action: Unknown action %s', action_name)
 				return False
 			action_type = topic_type[:-len('ActionResult')]
 		
@@ -328,10 +351,13 @@ class RostfulServer:
 	def add_actions(self, action_names):
 		if not action_names:
 			return
-		print "Adding actions:"
+		#print "Adding actions:"
 		for action_name in action_names:
-			ret = self.add_action(action_name)
-			if ret: print '  ' + action_name
+			if action_name.startswith('/'):
+				action_name = action_name[1:]
+			if not self.actions.has_key(action_name):
+				ret = self.add_action(action_name)
+				if ret: rospy.loginfo('RostfulServer::add_actions: added action %s', action_name)
 	
 	def wsgifunc(self):
 		"""Returns the WSGI-compatible function for this server."""
@@ -388,11 +414,13 @@ class RostfulServer:
 				return response_200(start_response, dfile.tostring(suppress_formats=True), content_type='text/plain')
 		
 		if not suffix:
+			topic_name = ''
 			if not self.topics.has_key(path):
 				for action_suffix in [Action.STATUS_SUFFIX,Action.RESULT_SUFFIX,Action.FEEDBACK_SUFFIX]:
 					action_name = path[:-(len(action_suffix)+1)]
 					if path.endswith('/' + action_suffix) and self.actions.has_key(action_name):
 						action = self.actions[action_name]
+						topic_name = action.name
 						msg = action.get(action_suffix)
 						break
 				else:
@@ -403,10 +431,13 @@ class RostfulServer:
 				if not topic.allow_sub:
 					return response_405(start_response)
 				
+				topic_name = topic.name
 				msg = topic.get()
 			
 			if msg is None:
+				rospy.logerr('RostfulServer::_handle_get: topic %s not available', topic_name)
 				return response_503(start_response, 'ROS message unavailable')
+			
 			if handler and handler.valid():
 				return handler.get(start_response, msg, **kwargs)
 			elif use_ros:
@@ -570,7 +601,22 @@ class RostfulServer:
 			print 'An exception occurred!', e
 			return response_500(start_response, e)
 	
-
+	def rosSetup(self):
+		'''
+			Creates and inits ROS components
+		'''
+		if not rospy.is_shutdown():
+			self.add_services(self.args.services)
+			self.add_topics(self.args.topics)
+			self.add_topics(self.args.publishes, allow_pub=False)
+			self.add_topics(self.args.subscribes, allow_sub=False)
+			self.add_actions(self.args.actions)
+			
+			self.t_ros_setup = threading.Timer(self.ros_setup_timer, self.rosSetup)
+			self.t_ros_setup.start()
+		
+		
+	
 import argparse
 from wsgiref.simple_server import make_server
 
@@ -590,6 +636,7 @@ def servermain():
 	parser.add_argument('--base-path', default='/', help='The base path of the http request, usually starting and ending with a "/".')
 	parser.add_argument('--jwt', action='store_true', default=False, help='This argument enables the use of JWT to guarantee a secure transmission')
 	parser.add_argument('--jwt-key', default='ros', help='This arguments sets the key to encode/decode the data')
+	parser.add_argument('--jwt-alg', default='HS256', help='This arguments sets the algorithm to encode/decode the data')
 	
 	args = parser.parse_args(rospy.myargv()[1:])
 	
@@ -601,18 +648,10 @@ def servermain():
 	time.sleep(init_delay)
 	
 	try:
-		server = RostfulServer(args.jwt, args.jwt_key)
-		
-		server.add_services(args.services)
-		server.add_topics(args.topics)
-		server.add_topics(args.publishes, allow_pub=False)
-		server.add_topics(args.subscribes, allow_sub=False)
-		server.add_actions(args.actions)
-		
-		server.base_path = args.base_path
+		server = RostfulServer(args)
 		
 		httpd = make_server(args.host, args.port, server.wsgifunc())
-		rospy.loginfo('rostful_server: Started server on port %d' % args.port)
+		rospy.loginfo('rostful_server: Started server on  %s:%d', args.host, args.port)
 		
 		#Wait forever for incoming http requests
 		httpd.serve_forever()
