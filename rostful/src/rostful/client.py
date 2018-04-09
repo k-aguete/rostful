@@ -105,7 +105,8 @@ class IndividualTopicProxy:
 	@classmethod
 	def start(cls):
 		for thread in cls._publisher_threads:
-			thread.start()
+			if not thread.isAlive():
+				thread.start()
 	
 	def __init__(self, url, name, msg_module, topic_type_name, pub=True, sub=True, publish_interval=None, binary=None, use_jwt=False, jwt_key='ros'):
 		self._use_jwt = use_jwt
@@ -223,7 +224,7 @@ class IndividualTopicProxy:
 def create_topic_proxy(url, name, topic_type, pub=True, sub=True, publish_interval=None, binary=None, use_jwt=False, jwt_key='ros'):
 	try:
 		topic_type_module, topic_type_name = tuple(topic_type.split('/'))
-		rospy.loginfo('create_topic_proxy: module = %s, name = %s, pub = %s, sub = %s', topic_type_module, topic_type_name, str(pub), str(sub))
+		#rospy.loginfo('create_topic_proxy: module = %s, name = %s, pub = %s, sub = %s', topic_type_module, topic_type_name, str(pub), str(sub))
 		roslib.load_manifest(topic_type_module)
 		msg_module = import_module(topic_type_module + '.msg')
 		
@@ -269,128 +270,26 @@ class RostfulServiceProxy:
 		
 		self.subscribe = subscribe
 		self.publish_interval = publish_interval
+		self.remap = remap
+		self.use_jwt = use_jwt
+		self.jwt_key = jwt_key
+		self.ros_setup_timer = 10
 		
-		config_url = self.url + '/_rosdef'
+		self.rosSetup()
 		
-		req = urllib2.Request(config_url)
-		
-		stop = False
-		
-		# Waiting for servver
-		while not (stop or rospy.is_shutdown()):
-			try:
-				res = urllib2.urlopen(req)
-				if res.getcode() == 200:
-					stop = True
-			except Exception, e:
-				rospy.loginfo('RostfulServiceProxy::__init__: waiting for url %s', self.url)
-				time.sleep(2)
-		
-		
-		
-		parser = deffile.DefFileParser()
-		parser.add_default_section_parser(deffile.INISectionParser)
-		
-		dfile = parser.parse(res.read().strip())
-		
-		print dfile
-		
-		if dfile.type == 'Node':
-			if self.prefix is None:
-				prefix = dfile.manifest['Name'] or ''
-			else:
-				prefix = self.prefix
-			if prefix:
-				prefix += '/'
-			services = dfile.get_section('Services')
-			if services:
-				print 'Services:'
-				for service_name, service_type in services.iteritems():
-					ret = self.setup_service(self.url + '/' + service_name, prefix + service_name, service_type, remap=remap, use_jwt=use_jwt, jwt_key=jwt_key)
-					if ret: print '  %s (%s)' % (prefix + service_name, service_type)
-			
-			topic_dict = {}
-			topic_info = namedtuple('topic_info', 'type pub sub')
-			
-			topic_section = dfile.get_section('Topics')
-			if topic_section:
-				print 'Topic section'
-				for topic_name, topic_type in topic_section.iteritems():
-					topic_dict[topic_name] = topic_info(type=topic_type, pub=True, sub=subscribe)
-			
-			published_section = dfile.get_section('Publishes')
-			if published_section:
-				print 'Published section'
-				for topic_name, topic_type in published_section.iteritems():
-					sub = topic_dict[topic_name].sub if topic_dict.has_key(topic_name) else False
-					topic_dict[topic_name] = topic_info(type=topic_type, pub=True, sub=sub)
-					print '%s-%s'%(topic_name,str(topic_dict[topic_name]))
-			
-			subscribed_section = dfile.get_section('Subscribes')
-			if subscribed_section:
-				print 'Subscribed section'
-				for topic_name, topic_type in subscribed_section.iteritems():
-					pub = topic_dict[topic_name].pub if topic_dict.has_key(topic_name) else False
-					topic_dict[topic_name] = topic_info(type=topic_type, pub=pub, sub=subscribe)
-					print '%s-%s'%(topic_name,str(topic_dict[topic_name]))
-				
-			topics = {}
-			published_topics = {}
-			subscribed_topics = {}
-			for topic_name, info in topic_dict.iteritems():
-				if info.pub and info.sub:
-					topics[topic_name] = info.type
-				elif info.pub:
-					published_topics[topic_name] = info.type
-				elif info.sub:
-					subscribed_topics[topic_name] = info.type
-			
-			if topics:
-				rospy.loginfo('rostful_client::RostfulServiceProxy: Publishing and subscribing')
-				for topic_name, topic_type in topics.iteritems():
-					ret = self.setup_topic(self.url + '/' + topic_name, prefix + topic_name, topic_type, pub=True, sub=True, remap=remap, publish_interval=publish_interval, use_jwt=use_jwt, jwt_key=jwt_key)
-					if ret: print '  %s (%s)' % (prefix + topic_name, topic_type)
-			
-			if published_topics:
-				rospy.loginfo('rostful_client::RostfulServiceProxy: Publishing')
-				for topic_name, topic_type in published_topics.iteritems():
-					ret = self.setup_topic(self.url + '/' + topic_name, prefix + topic_name, topic_type, pub=True, remap=remap, publish_interval=publish_interval, use_jwt=use_jwt, jwt_key=jwt_key)
-					if ret: print '  %s (%s)' % (prefix + topic_name, topic_type)
-			
-			if subscribed_topics:
-				rospy.loginfo('rostful_client::RostfulServiceProxy: Subscribing')
-				for topic_name, topic_type in subscribed_topics.iteritems():
-					ret = self.setup_topic(self.url + '/' + topic_name, prefix + topic_name, topic_type, pub=False, sub=True, remap=remap, publish_interval=publish_interval, use_jwt=use_jwt, jwt_key=jwt_key)
-					if ret: print '  %s (%s)' % (prefix + topic_name, topic_type)
-			
-			actions = dfile.get_section('Actions')
-			if actions:
-				print 'Actions:'
-				for action_name, action_type in actions.iteritems():
-					ret = self.setup_action(self.url + '/' + action_name, prefix + action_name, action_type, remap=remap, publish_interval=publish_interval, use_jwt=use_jwt, jwt_key=jwt_key)
-					if ret: print '  %s (%s)' % (prefix + action_name, action_type)
-		elif dfile.type == 'Service':
-			ret = self.setup_service(self.url, dfile.manifest['Name'], dfile.manifest['Type'], remap=remap)
-			if ret: print 'Connected to service %s (%s)' % (dfile.manifest['Name'], dfile.manifest['Type'])
-		elif dfile.type == 'Topic':
-			pub = dfile.manifest['Subscribes'].lower() == 'true'
-			sub = dfile.manifest['Publishes'].lower() == 'true' and subscribe
-			ret = self.setup_topic(self.url, dfile.manifest['Name'], dfile.manifest['Type'], pub=pub, sub=sub, remap=remap, publish_interval=publish_interval, use_jwt=use_jwt, jwt_key=jwt_key)
-			if ret: print 'Connected to topic %s (%s)' % (dfile.manifest['Name'], dfile.manifest['Type'])
-		elif dfile.type == 'Action':
-			ret = self.setup_action(self.url, dfile.manifest['Name'], dfile.manifest['Type'], remap=remap, publish_interval=publish_interval)
-			if ret: print 'Connected to action %s (%s)' % (dfile.manifest['Name'], dfile.manifest['Type'])
-			
-		IndividualTopicProxy.start()
 		return
 	
 	def setup_service(self, service_url, service_name, service_type, remap=False, use_jwt = False, jwt_key = 'ros'):
 		if remap:
 			service_name = service_name + '_ws'
 		
-		proxy = create_service_proxy(service_url, service_name, service_type, binary=self.binary, use_jwt = use_jwt, jwt_key = jwt_key)
-		if proxy is None: return False
-		self.services[service_name] = proxy
+		if not self.services.has_key(service_name):
+			proxy = create_service_proxy(service_url, service_name, service_type, binary=self.binary, use_jwt = self.use_jwt, jwt_key = self.jwt_key)
+			if proxy is None: return False
+			self.services[service_name] = proxy
+		#else:
+		#	rospy.loginfo('RostfulServiceProxy::setup_service: Service %s already exists', service_name)
+		
 		return True
 	
 	def setup_topic(self, topic_url, topic_name, topic_type, pub=None, sub=None, remap=False, publish_interval=None, use_jwt = False, jwt_key = 'ros'):
@@ -402,19 +301,145 @@ class RostfulServiceProxy:
 		if sub is None:
 			sub = True
 		
-		proxy = create_topic_proxy(topic_url, topic_name, topic_type, pub=pub, sub=sub, publish_interval=publish_interval, binary=self.binary, use_jwt = use_jwt, jwt_key = jwt_key)
-		if proxy is None: return False
-		self.topics[topic_name] = proxy
+		if not self.topics.has_key(topic_name):
+			proxy = create_topic_proxy(topic_url, topic_name, topic_type, pub=pub, sub=sub, publish_interval=publish_interval, binary=self.binary, use_jwt = self.use_jwt, jwt_key = self.jwt_key)
+			if proxy is None: return False
+			self.topics[topic_name] = proxy
+		#else:
+		#	rospy.loginfo('RostfulServiceProxy::setup_topic: Topic %s already exists', topic_name)
+		
 		return True
 	
 	def setup_action(self, action_url, action_name, action_type, remap=False, publish_interval=None, use_jwt = False, jwt_key = 'ros'):
 		if remap:
 			action_name = action_name + '_ws'
 		
-		proxy = create_action_proxies(action_url, action_name, action_type, publish_interval=publish_interval, binary=self.binary, use_jwt = use_jwt, jwt_key = jwt_key)
-		if proxy is None: return False
-		self.actions[action_name] = proxy
+		if not self.actions.has_key(action_name):
+			proxy = create_action_proxies(action_url, action_name, action_type, publish_interval=publish_interval, binary=self.binary, use_jwt = self.use_jwt, jwt_key = self.jwt_key)
+			if proxy is None: return False
+			self.actions[action_name] = proxy
+		#else:
+		#	rospy.loginfo('RostfulServiceProxy::setup_action: Action %s already exists', action_name)
+			
 		return True
+		
+	def rosSetup(self):
+		'''
+			Creates and inits ROS components
+		'''
+		if not rospy.is_shutdown():
+			config_url = self.url + '/_rosdef'
+		
+			req = urllib2.Request(config_url)
+			ret = True
+			try:
+				res = urllib2.urlopen(req)
+				if res.getcode() != 200:
+					rospy.logerr('RostfulServiceProxy::__init__: error getting info from url %s', self.url)
+					ret = False
+			except Exception, e:
+				rospy.logerr('RostfulServiceProxy::__init__:  error waiting for url %s: %s', self.url, e)
+				ret = False
+			
+			if ret:	
+				parser = deffile.DefFileParser()
+				parser.add_default_section_parser(deffile.INISectionParser)
+				
+				dfile = parser.parse(res.read().strip())
+				
+				#print 'rosSetup'
+				#print dfile
+				
+				if dfile.type == 'Node':
+					if self.prefix is None:
+						prefix = dfile.manifest['Name'] or ''
+					else:
+						prefix = self.prefix
+					if prefix:
+						prefix += '/'
+					services = dfile.get_section('Services')
+					if services:
+						#print 'Services:'
+						for service_name, service_type in services.iteritems():
+							ret = self.setup_service(self.url + '/' + service_name, prefix + service_name, service_type, remap=self.remap, use_jwt=self.use_jwt, jwt_key=self.jwt_key)
+							#if ret: print '  %s (%s)' % (prefix + service_name, service_type)
+					
+					topic_dict = {}
+					topic_info = namedtuple('topic_info', 'type pub sub')
+					
+					topic_section = dfile.get_section('Topics')
+					if topic_section:
+						#print 'Topic section'
+						for topic_name, topic_type in topic_section.iteritems():
+							topic_dict[topic_name] = topic_info(type=topic_type, pub=True, sub=self.subscribe)
+					
+					published_section = dfile.get_section('Publishes')
+					if published_section:
+						#print 'Published section'
+						for topic_name, topic_type in published_section.iteritems():
+							sub = topic_dict[topic_name].sub if topic_dict.has_key(topic_name) else False
+							topic_dict[topic_name] = topic_info(type=topic_type, pub=True, sub=sub)
+							#print '%s-%s'%(topic_name,str(topic_dict[topic_name]))
+					
+					subscribed_section = dfile.get_section('Subscribes')
+					if subscribed_section:
+						#print 'Subscribed section'
+						for topic_name, topic_type in subscribed_section.iteritems():
+							pub = topic_dict[topic_name].pub if topic_dict.has_key(topic_name) else False
+							topic_dict[topic_name] = topic_info(type=topic_type, pub=pub, sub=self.subscribe)
+							#print '%s-%s'%(topic_name,str(topic_dict[topic_name]))
+						
+					topics = {}
+					published_topics = {}
+					subscribed_topics = {}
+					for topic_name, info in topic_dict.iteritems():
+						if info.pub and info.sub:
+							topics[topic_name] = info.type
+						elif info.pub:
+							published_topics[topic_name] = info.type
+						elif info.sub:
+							subscribed_topics[topic_name] = info.type
+					
+					if topics:
+						#rospy.loginfo('rostful_client::RostfulServiceProxy: Publishing and subscribing')
+						for topic_name, topic_type in topics.iteritems():
+							ret = self.setup_topic(self.url + '/' + topic_name, prefix + topic_name, topic_type, pub=True, sub=True, remap=self.remap, publish_interval=self.publish_interval, use_jwt=self.use_jwt, jwt_key=self.jwt_key)
+							#if ret: print '  %s (%s)' % (prefix + topic_name, topic_type)
+					
+					if published_topics:
+						#rospy.loginfo('rostful_client::RostfulServiceProxy: Publishing')
+						for topic_name, topic_type in published_topics.iteritems():
+							ret = self.setup_topic(self.url + '/' + topic_name, prefix + topic_name, topic_type, pub=True, remap=self.remap, publish_interval=self.publish_interval, use_jwt=self.use_jwt, jwt_key=self.jwt_key)
+							#if ret: print '  %s (%s)' % (prefix + topic_name, topic_type)
+					
+					if subscribed_topics:
+						#rospy.loginfo('rostful_client::RostfulServiceProxy: Subscribing')
+						for topic_name, topic_type in subscribed_topics.iteritems():
+							ret = self.setup_topic(self.url + '/' + topic_name, prefix + topic_name, topic_type, pub=False, sub=True, remap=self.remap, publish_interval=self.publish_interval, use_jwt=self.use_jwt, jwt_key=self.jwt_key)
+							#if ret: print '  %s (%s)' % (prefix + topic_name, topic_type)
+					
+					actions = dfile.get_section('Actions')
+					if actions:
+						#print 'Actions:'
+						for action_name, action_type in actions.iteritems():
+							ret = self.setup_action(self.url + '/' + action_name, prefix + action_name, action_type, remap=self.remap, publish_interval=self.publish_interval, use_jwt=self.use_jwt, jwt_key=self.jwt_key)
+							#if ret: print '  %s (%s)' % (prefix + action_name, action_type)
+				elif dfile.type == 'Service':
+					ret = self.setup_service(self.url, dfile.manifest['Name'], dfile.manifest['Type'], remap=self.remap)
+					#if ret: print 'Connected to service %s (%s)' % (dfile.manifest['Name'], dfile.manifest['Type'])
+				elif dfile.type == 'Topic':
+					pub = dfile.manifest['Subscribes'].lower() == 'true'
+					sub = dfile.manifest['Publishes'].lower() == 'true' and self.subscribe
+					ret = self.setup_topic(self.url, dfile.manifest['Name'], dfile.manifest['Type'], pub=pub, sub=sub, remap=self.remap, publish_interval=self.publish_interval, use_jwt=self.use_jwt, jwt_key=self.jwt_key)
+					#if ret: print 'Connected to topic %s (%s)' % (dfile.manifest['Name'], dfile.manifest['Type'])
+				elif dfile.type == 'Action':
+					ret = self.setup_action(self.url, dfile.manifest['Name'], dfile.manifest['Type'], remap=self.remap, publish_interval=self.publish_interval)
+					#if ret: print 'Connected to action %s (%s)' % (dfile.manifest['Name'], dfile.manifest['Type'])
+				
+				IndividualTopicProxy.start()
+			
+			self.t_ros_setup = threading.Timer(self.ros_setup_timer, self.rosSetup)
+			self.t_ros_setup.start()
 
 import argparse
 
