@@ -27,7 +27,7 @@ The ROStful server can provide services, topics, and actions that are locally av
 
 ROStful uses the rosbridge JSON mapping by default, but binary serialized ROS messages can be sent with the `Content-Header` set to `application/vnd.ros.msg`. Giving this MIME type in the `Accept` header for queries without input (i.e., publishing topic methods) will cause the server to return serialized messages. Images are also supported.
 
-Supports JSON Web token [jwt](https://jwt.io/introduction/) that defines a compact and self-contained way for securely transmitting information between parties as a JSON object. This information can be verified and trusted because it is digitally signed.
+Supports JSON Web token [jwt](https://jwt.io/introduction/) that defines a compact and self-contained way for securely transmitting information between parties as a JSON object. This information can be verified and trusted because it is digitally signed. Install with `pip install pyjwt`
 
 The ROStful client
 ------------------
