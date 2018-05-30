@@ -11,7 +11,8 @@
   -->
   <node pkg="rostful" type="server" name="rostful_server" 
 output="screen"
-	args="--jwt --jwt-key ros --host $(arg host) -p $(arg port) --topics /hello /bye --services /fake_node/service --actions /fake_node/wait "/>
+	args="--jwt  --host $(arg host) -p $(arg port) --topics /hello bye --services fake_node/service --actions fake_node/wait "/>
+	<!-- rest-prefix ros -->
 
 </launch>
 

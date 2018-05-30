@@ -255,11 +255,23 @@ def create_action_proxies(url, name, action_type, publish_interval=None, binary=
 		return None
 
 class RostfulServiceProxy:
-	def __init__(self, url, remap=False, subscribe=False, publish_interval=None, binary=None, prefix=None, use_jwt=False, jwt_key='ros'):
+	def __init__(self, url, remap=False, subscribe=False, publish_interval=None, binary=None, prefix=None, use_jwt=False, jwt_key='ros', rest_prefix_server=''):
+		
+		self.rest_prefix_server = rest_prefix_server
+		
 		if url.endswith('/'):
 			url = url[:-1]
-		self.url = url
+		
+		if self.rest_prefix_server.endswith('/'):
+			self.rest_prefix_server = self.rest_prefix_server[:-1]
+		if not self.rest_prefix_server.startswith('/'):
+			self.rest_prefix_server = '/' + self.rest_prefix_server	
+			
+		self.url = url+self.rest_prefix_server
 
+		if self.url.endswith('/'):
+			self.url = self.url[:-1]
+			
 		self.binary = binary
 		
 		self.prefix=prefix
@@ -463,12 +475,15 @@ def clientmain():
 	grp = parser.add_mutually_exclusive_group()
 	grp.add_argument('--prefix', help='Specify a prefix for the service and topic names. By default, this is the name given by the web service if it provides one.')
 	grp.add_argument('--no-prefix', action='store_const', const = '', dest='prefix', help='Use the service and topic names as-is as relative names.')
+	parser.add_argument('--rest-prefix-server', default='/', help='The prefix path of the http request to the server, usually starting with a "/".')
+
 	
 	args = parser.parse_args(rospy.myargv()[1:])
 	
 	if not args.url.startswith('http'):
 		args.url = 'http://' + args.url
 	
-	proxy = RostfulServiceProxy(args.url, remap=args.test, subscribe=args.subscribe, publish_interval = args.publish_interval, binary=args.binary, prefix=args.prefix, use_jwt=args.jwt, jwt_key=args.jwt_key)
+	
+	proxy = RostfulServiceProxy(args.url, remap=args.test, subscribe=args.subscribe, publish_interval = args.publish_interval, binary=args.binary, prefix=args.prefix, use_jwt=args.jwt, jwt_key=args.jwt_key, rest_prefix_server = args.rest_prefix_server)
 	
 	rospy.spin()
