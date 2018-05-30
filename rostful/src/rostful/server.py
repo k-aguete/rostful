@@ -261,13 +261,19 @@ class RostfulServer:
 		self.services = {}
 		self.topics = {}
 		self.actions = {}
-		self.base_path = '/'
+		self.rest_prefix = '/'
 		self._use_jwt = args.jwt
 		self.jwt_iface = JwtInterface(key = args.jwt_key, algorithm = args.jwt_alg)
 		self.ros_setup_timer = 10
 		self.args = args
-		self.base_path = args.base_path
+		self.rest_prefix = args.rest_prefix
 		
+		if self.rest_prefix != '/':
+			if not self.rest_prefix.startswith('/'):
+				self.rest_prefix = '/'+self.rest_prefix
+			if not self.rest_prefix.endswith('/'):
+				self.rest_prefix = self.rest_prefix+'/'
+				
 		self.rosSetup()
 		
 	def add_service(self, service_name, ws_name=None, service_type=None):
@@ -292,13 +298,16 @@ class RostfulServer:
 		#print "Adding services:"
 		for service_name in service_names:
 			if service_name.startswith('/'):
-				service_name = service_name[1:]
-			if not self.services.has_key(service_name):
+				service_name_key = service_name[1:]
+			else:
+				service_name_key = service_name
+			if not self.services.has_key(service_name_key):
 				ret = self.add_service(service_name)
 				if ret: rospy.loginfo('RostfulServer::add_services: added %s', service_name)
 	
 	def add_topic(self, topic_name, ws_name=None, topic_type=None, allow_pub=True, allow_sub=True):
 		resolved_topic_name = rospy.resolve_name(topic_name)
+		rospy.loginfo('RostfulServer: add_topic: topic_name=%s, resolved_topic_name = %s', topic_name, resolved_topic_name)
 		if topic_type is None:
 			topic_type, _, _ = rostopic.get_topic_type(resolved_topic_name)
 			if not topic_type:
@@ -307,6 +316,7 @@ class RostfulServer:
 		
 		if ws_name is None:
 			ws_name = topic_name
+		
 		if ws_name.startswith('/'):
 			ws_name = ws_name[1:]
 		
@@ -325,8 +335,10 @@ class RostfulServer:
 		'''
 		for topic_name in topic_names:
 			if topic_name.startswith('/'):
-				topic_name = topic_name[1:]
-			if not self.topics.has_key(topic_name):
+				topic_name_key = topic_name[1:]
+			else:
+				topic_name_key = topic_name
+			if not self.topics.has_key(topic_name_key):
 				ret = self.add_topic(topic_name, allow_pub=allow_pub, allow_sub=allow_sub)
 				if ret:
 					rospy.loginfo('RostfulServer::add_topics: added topic %s' ,topic_name)
@@ -354,8 +366,10 @@ class RostfulServer:
 		#print "Adding actions:"
 		for action_name in action_names:
 			if action_name.startswith('/'):
-				action_name = action_name[1:]
-			if not self.actions.has_key(action_name):
+				action_name_key = action_name[1:]
+			else:
+				action_name_key = action_name
+			if not self.actions.has_key(action_name_key):
 				ret = self.add_action(action_name)
 				if ret: rospy.loginfo('RostfulServer::add_actions: added action %s', action_name)
 	
@@ -380,8 +394,8 @@ class RostfulServer:
 		for key in kwargs:
 			kwargs[key] = kwargs[key][-1]
 
-		if self.base_path and path.startswith(self.base_path):
-			path = path[len(self.base_path):]
+		if self.rest_prefix and path.startswith(self.rest_prefix):
+			path = path[len(self.rest_prefix):]
 		
 		json_suffix = '.json'
 		jsn = False
@@ -517,8 +531,8 @@ class RostfulServer:
 	def _handle_post(self, environ, start_response):
 		name =  environ['PATH_INFO']
 		
-		if self.base_path and name.startswith(self.base_path):
-			name = name[len(self.base_path):]
+		if self.rest_prefix and name.startswith(self.rest_prefix):
+			name = name[len(self.rest_prefix):]
 		
 		try:
 			length = int(environ['CONTENT_LENGTH'])
@@ -633,7 +647,7 @@ def servermain():
 	
 	parser.add_argument('--host', default='')
 	parser.add_argument('-p', '--port', type=int, default=8080)
-	parser.add_argument('--base-path', default='/', help='The base path of the http request, usually starting and ending with a "/".')
+	parser.add_argument('--rest-prefix', default='/', help='The prefix path of the http request, usually starting and ending with a "/".')
 	parser.add_argument('--jwt', action='store_true', default=False, help='This argument enables the use of JWT to guarantee a secure transmission')
 	parser.add_argument('--jwt-key', default='ros', help='This arguments sets the key to encode/decode the data')
 	parser.add_argument('--jwt-alg', default='HS256', help='This arguments sets the algorithm to encode/decode the data')
