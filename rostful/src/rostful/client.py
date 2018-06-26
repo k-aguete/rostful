@@ -106,7 +106,10 @@ class IndividualTopicProxy:
 	def start(cls):
 		for thread in cls._publisher_threads:
 			if not thread.isAlive():
-				thread.start()
+				try:
+					thread.start()
+				except Exception, e:
+					 rospy.logerr("IndividualTopicProxy::start: %s", str(e))
 	
 	def __init__(self, url, name, msg_module, topic_type_name, pub=True, sub=True, publish_interval=None, binary=None, use_jwt=False, jwt_key='ros'):
 		self._use_jwt = use_jwt
@@ -186,7 +189,7 @@ class IndividualTopicProxy:
 				wsres = urllib2.urlopen(wsreq)	
 				ret_code = wsres.getcode()
 			except Exception, e:
-				rospy.logerr("IndividualTopicProxy::publish:Encountered an error while retrieving a message on topic %s: %s\n" % (self.name, str(e)))
+				rospy.logerr("IndividualTopicProxy::publish: Encountered an error while retrieving a message on topic %s: %s\n" % (self.name, str(e)))
 			
 			if ret_code == 200:
 					
@@ -205,19 +208,33 @@ class IndividualTopicProxy:
 							msg = None
 						else:
 							data.pop('_format', None)
-							msgconv.populate_instance(data, msg)
+							try:
+								msgconv.populate_instance(data, msg)
+							except Exception, e:
+								rospy.logerr("IndividualTopicProxy::publish: Encountered an error while creating a message on topic %s: %s\n" % (self.name, str(e)))
+								msg = None
 					else:
 						msg = None
 				else:
-					data = json.loads(data_str.strip())
+					try:
+						data = json.loads(data_str.strip())
+					except Exception, e:
+						rospy.logerr("IndividualTopicProxy::publish: Encountered an error while decoding a message on topic %s: %s\n" % (self.name, str(e)))
+						data = None
+						
 					if not data:
 						msg = None
 					else:
 						data.pop('_format', None)
-						msgconv.populate_instance(data, msg)
+						try:
+							msgconv.populate_instance(data, msg)
+						except Exception, e:
+							rospy.logerr("IndividualTopicProxy::publish: Encountered an error while creating a message on topic %s: %s\n" % (self.name, str(e)))
+							msg = None
 				
 				if msg is not None:
 					self.publisher.publish(msg)
+			
 			rospy.sleep(self.publish_interval)
 				
 
@@ -347,10 +364,10 @@ class RostfulServiceProxy:
 			try:
 				res = urllib2.urlopen(req)
 				if res.getcode() != 200:
-					rospy.logerr('RostfulServiceProxy::__init__: error getting info from url %s', self.url)
+					rospy.logerr('RostfulServiceProxy::rosSetup: error getting info from url %s', self.url)
 					ret = False
 			except Exception, e:
-				rospy.logerr('RostfulServiceProxy::__init__:  error waiting for url %s: %s', self.url, e)
+				rospy.logerr('RostfulServiceProxy::rosSetup: error waiting for url %s: %s', self.url, e)
 				ret = False
 			
 			if ret:	
