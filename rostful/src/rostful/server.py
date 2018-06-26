@@ -320,7 +320,12 @@ class RostfulServer:
 		if ws_name.startswith('/'):
 			ws_name = ws_name[1:]
 		
-		self.topics[ws_name] = Topic(topic_name, topic_type, allow_pub=allow_pub, allow_sub=allow_sub)
+		try:
+			self.topics[ws_name] = Topic(topic_name, topic_type, allow_pub=allow_pub, allow_sub=allow_sub)
+		except Exception, e:
+			rospy.logerr("RostfulServer::add_topic: Error creating Topic for %s:%s" %(topic_name, topic_type))
+			return False
+
 		return True
 	
 	def add_topics(self, topic_names, allow_pub=True, allow_sub=True):
