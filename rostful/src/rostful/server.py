@@ -26,7 +26,8 @@ from .util import ROS_MSG_MIMETYPE, get_query_bool
 import time, threading
 
 from .jwt_interface import JwtInterface
-
+from xmljson import abdera
+from xml.etree.ElementTree import fromstring
 TOPIC_SUBSCRIBER_TIMEOUT=5.0
 
 class Service:
@@ -535,7 +536,7 @@ class RostfulServer:
 		
 	def _handle_post(self, environ, start_response):
 		name =  environ['PATH_INFO']
-		
+
 		if self.rest_prefix and name.startswith(self.rest_prefix):
 			name = name[len(self.rest_prefix):]
 		
@@ -569,7 +570,7 @@ class RostfulServer:
 			input_data = environ['wsgi.input'].read(length)
 			
 			input_msg = input_msg_type()
-			content_type = 'application/json'
+			#content_type = 'application/json'
 			if use_ros:
 				input_msg.deserialize(input_data)
 			elif self._use_jwt:
@@ -577,10 +578,20 @@ class RostfulServer:
 				input_data.pop('_format', None)	
 				msgconv.populate_instance(input_data, input_msg)
 				content_type = 'application/jwt'
-			else:
+			elif content_type == 'application/json':
+				rospy.logwarn(input_data)
 				input_data = json.loads(input_data)
+				rospy.logwarn(input_data)
 				input_data.pop('_format', None)	
-				msgconv.populate_instance(input_data, input_msg)			
+				rospy.logwarn(input_data)
+				msgconv.populate_instance(input_data, input_msg)
+			elif content_type == 'application/xml':
+				input_data = fromstring(input_data)
+				input_data = abdera.data(input_data)
+				input_data = json.dumps(input_data)
+				input_data = json.loads(input_data)
+				input_data.pop('_format', None)
+				msgconv.populate_instance(input_data, input_msg)
 			
 			ret_msg = None
 
