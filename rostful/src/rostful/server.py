@@ -261,7 +261,7 @@ def response_503(start_response, error, content_type='text/plain'):
 	return response(start_response, '503 Service Unavailable', e_str, content_type)
 
 class RostfulServer:
-	def __init__(self, args):
+	def __init__(self, args, args_dict):
 		self.services = {}
 		self.topics = {}
 		self.actions = {}
@@ -270,6 +270,7 @@ class RostfulServer:
 		self.jwt_iface = JwtInterface(key = args.jwt_key, algorithm = args.jwt_alg)
 		self.ros_setup_timer = 10
 		self.args = args
+		self.args_dict = args_dict
 		self.rest_prefix = args.rest_prefix
 		
 		if self.rest_prefix != '/':
@@ -311,7 +312,7 @@ class RostfulServer:
 	
 	def add_topic(self, topic_name, ws_name=None, topic_type=None, allow_pub=True, allow_sub=True):
 		resolved_topic_name = rospy.resolve_name(topic_name)
-		rospy.loginfo('RostfulServer: add_topic: topic_name=%s, resolved_topic_name = %s', topic_name, resolved_topic_name)
+		#rospy.loginfo('RostfulServer: add_topic: topic_name=%s, resolved_topic_name = %s', topic_name, resolved_topic_name)
 		if topic_type is None:
 			topic_type, _, _ = rostopic.get_topic_type(resolved_topic_name)
 			if not topic_type:
@@ -327,6 +328,9 @@ class RostfulServer:
 		
 		try:
 			self.topics[ws_name] = Topic(topic_name, topic_type, allow_pub=allow_pub, allow_sub=allow_sub)
+			rospy.loginfo('RostfulServer::add_topic: topic_name=%s, topic_type = %s, topic_url = %s',
+							topic_name, topic_type, ws_name)
+
 		except Exception, e:
 			rospy.logerr("RostfulServer::add_topic: Error creating Topic for %s:%s" %(topic_name, topic_type))
 			return False
@@ -348,15 +352,10 @@ class RostfulServer:
 				topic_name_key = topic_name[1:]
 			else:
 				topic_name_key = topic_name
-			if not self.topics.has_key("xml/"+topic_name_key) or not self.topics.has_key("json/"+topic_name_key):
-				ret = self.add_topic(topic_name, ws_name="xml",
-				                     allow_pub=allow_pub, allow_sub=allow_sub)
-				if ret:
-					rospy.loginfo('RostfulServer::add_topics: added topic %s', topic_name)
-				ret = self.add_topic(topic_name, ws_name="json",
-				                     allow_pub=allow_pub, allow_sub=allow_sub)
-				if ret:
-					rospy.loginfo('RostfulServer::add_topics: added topic %s', topic_name)
+			for prefix_type in self.args_dict['topic_types']:
+				if not self.topics.has_key(prefix_type+"/"+topic_name_key) and not self.topics.has_key(topic_name_key):
+					ret = self.add_topic(topic_name, ws_name=prefix_type,
+                                            allow_pub=allow_pub, allow_sub=allow_sub)
 	
 	def add_action(self, action_name, ws_name=None, action_type=None):
 		if action_type is None:
@@ -651,9 +650,9 @@ class RostfulServer:
 		'''
 		if not rospy.is_shutdown():
 			self.add_services(self.args.services)
-			self.add_topics(self.args.topics)
-			self.add_topics(self.args.publishes, allow_pub=False)
-			self.add_topics(self.args.subscribes, allow_sub=False)
+			self.add_topics(self.args_dict['topics'])
+			#self.add_topics(self.args.publishes, allow_pub=False)
+			#self.add_topics(self.args.subscribes, allow_sub=False)
 			self.add_actions(self.args.actions)
 			
 			self.t_ros_setup = threading.Timer(self.ros_setup_timer, self.rosSetup)
@@ -666,7 +665,14 @@ from wsgiref.simple_server import make_server
 
 def servermain():
 	rospy.init_node('rostful_server', anonymous=True, disable_signals=True)
-	
+	topics_list = rospy.get_param("~topics")
+	args_dict = {}
+
+	args_dict['topic_types'] = ['']
+	if topics_list.has_key('types'):
+		args_dict['topic_types'] = topics_list['types']
+	args_dict['topics'] = topics_list['topics_list']
+
 	parser = argparse.ArgumentParser()
 	
 	parser.add_argument('--services', '--srv', nargs='+', help='Services to advertise')
@@ -683,7 +689,6 @@ def servermain():
 	parser.add_argument('--jwt-alg', default='HS256', help='This arguments sets the algorithm to encode/decode the data')
 	
 	args = parser.parse_args(rospy.myargv()[1:])
-	
 	init_delay = 0.0
 	if rospy.search_param('init_delay'):
 		init_delay = rospy.get_param('~init_delay')
@@ -692,7 +697,7 @@ def servermain():
 	time.sleep(init_delay)
 	
 	try:
-		server = RostfulServer(args)
+		server = RostfulServer(args, args_dict)
 		
 		httpd = make_server(args.host, args.port, server.wsgifunc())
 		rospy.loginfo('rostful_server: Started server on  %s:%d', args.host, args.port)
