@@ -286,15 +286,23 @@ class RostfulServer:
 		if service_type is None:
 			service_type = rosservice.get_service_type(resolved_service_name)
 			if not service_type:
-				rospy.logerr('RostfulServer:add_service: Unknown service %s',service_name)
+				rospy.logerr('RostfulServer::add_service: Unknown service %s',service_name)
 				return False
 		
 		if ws_name is None:
 			ws_name = service_name
+		else:
+			ws_name = ws_name + service_name
 		if ws_name.startswith('/'):
 			ws_name = ws_name[1:]
-		
-		self.services[ws_name] = Service(service_name, service_type)
+		try:
+			self.services[ws_name] = Service(service_name, service_type)
+			rospy.loginfo('RostfulServer::add_service: service_name=%s, service_type = %s, service_url = %s',
+							service_name, service_type, ws_name)
+		except Exception, e:
+			rospy.logerr("RostfulServer::add_service: Error creating Servie for %s:%s" %(service_name, service_type))
+			return False
+
 		return True
 	
 	def add_services(self, service_names):
@@ -306,9 +314,10 @@ class RostfulServer:
 				service_name_key = service_name[1:]
 			else:
 				service_name_key = service_name
-			if not self.services.has_key(service_name_key):
-				ret = self.add_service(service_name)
-				if ret: rospy.loginfo('RostfulServer::add_services: added %s', service_name)
+			for prefix_type in self.args_dict['service_types']:
+				if not self.services.has_key(prefix_type+"/"+service_name_key) and not self.services.has_key(service_name_key):
+					ret = self.add_service(service_name, ws_name=prefix_type)
+					if ret: rospy.loginfo('RostfulServer::add_services: added %s', service_name)
 	
 	def add_topic(self, topic_name, ws_name=None, topic_type=None, allow_pub=True, allow_sub=True):
 		resolved_topic_name = rospy.resolve_name(topic_name)
@@ -330,7 +339,6 @@ class RostfulServer:
 			self.topics[ws_name] = Topic(topic_name, topic_type, allow_pub=allow_pub, allow_sub=allow_sub)
 			rospy.loginfo('RostfulServer::add_topic: topic_name=%s, topic_type = %s, topic_url = %s',
 							topic_name, topic_type, ws_name)
-
 		except Exception, e:
 			rospy.logerr("RostfulServer::add_topic: Error creating Topic for %s:%s" %(topic_name, topic_type))
 			return False
@@ -649,7 +657,7 @@ class RostfulServer:
 			Creates and inits ROS components
 		'''
 		if not rospy.is_shutdown():
-			self.add_services(self.args.services)
+			self.add_services(self.args_dict['services'])
 			self.add_topics(self.args_dict['topics'])
 			#self.add_topics(self.args.publishes, allow_pub=False)
 			#self.add_topics(self.args.subscribes, allow_sub=False)
@@ -666,6 +674,7 @@ from wsgiref.simple_server import make_server
 def servermain():
 	rospy.init_node('rostful_server', anonymous=True, disable_signals=True)
 	topics_list = rospy.get_param("~topics")
+	services_list = rospy.get_param("~services")
 	args_dict = {}
 
 	args_dict['topic_types'] = ['']
@@ -673,10 +682,15 @@ def servermain():
 		args_dict['topic_types'] = topics_list['types']
 	args_dict['topics'] = topics_list['topics_list']
 
+	args_dict['service_types'] = ['']
+	if services_list.has_key('types'):
+		args_dict['service_types'] = services_list['types']
+	args_dict['services'] = services_list['services_list']
+
 	parser = argparse.ArgumentParser()
 	
-	parser.add_argument('--services', '--srv', nargs='+', help='Services to advertise')
-	parser.add_argument('--topics', nargs='+', help='Topics to both publish and subscribe')
+	#parser.add_argument('--services', '--srv', nargs='+', help='Services to advertise')
+	#parser.add_argument('--topics', nargs='+', help='Topics to both publish and subscribe')
 	parser.add_argument('--publishes', '--pub', nargs='+', help='Topics to publish via web services')
 	parser.add_argument('--subscribes', '--sub', nargs='+', help='Topics to allowing publishing to via web services')
 	parser.add_argument('--actions', nargs='+', help='Actions to advertise')
