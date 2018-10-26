@@ -28,6 +28,9 @@ import time, threading
 from .jwt_interface import JwtInterface
 from xmljson import abdera
 from xml.etree.ElementTree import fromstring
+
+import dicttoxml
+
 TOPIC_SUBSCRIBER_TIMEOUT=5.0
 
 class Service:
@@ -317,7 +320,8 @@ class RostfulServer:
 		
 		if ws_name is None:
 			ws_name = topic_name
-		
+		else:
+			ws_name = ws_name + topic_name
 		if ws_name.startswith('/'):
 			ws_name = ws_name[1:]
 		
@@ -344,10 +348,15 @@ class RostfulServer:
 				topic_name_key = topic_name[1:]
 			else:
 				topic_name_key = topic_name
-			if not self.topics.has_key(topic_name_key):
-				ret = self.add_topic(topic_name, allow_pub=allow_pub, allow_sub=allow_sub)
+			if not self.topics.has_key("xml/"+topic_name_key) or not self.topics.has_key("json/"+topic_name_key):
+				ret = self.add_topic(topic_name, ws_name="xml",
+				                     allow_pub=allow_pub, allow_sub=allow_sub)
 				if ret:
-					rospy.loginfo('RostfulServer::add_topics: added topic %s' ,topic_name)
+					rospy.loginfo('RostfulServer::add_topics: added topic %s', topic_name)
+				ret = self.add_topic(topic_name, ws_name="json",
+				                     allow_pub=allow_pub, allow_sub=allow_sub)
+				if ret:
+					rospy.loginfo('RostfulServer::add_topics: added topic %s', topic_name)
 	
 	def add_action(self, action_name, ws_name=None, action_type=None):
 		if action_type is None:
@@ -406,6 +415,7 @@ class RostfulServer:
 		json_suffix = '.json'
 		jsn = False
 		handler = NullTransform()
+		first_path = path.split('/')[0].split('.')
 		last_path = path.split('/')[-1].split('.')
 		if len(last_path) > 1:
 			file_type = last_path[-1]
@@ -471,9 +481,16 @@ class RostfulServer:
 				output_data = msgconv.extract_values(msg)
 				output_data = self.jwt_iface.encode(output_data)
 			else:
-				content_type = 'application/json'
-				output_data = msgconv.extract_values(msg)
-				output_data = json.dumps(output_data)
+				if first_path[0] == "xml":
+					content_type = 'application/xml'
+					output_data = msgconv.extract_values(msg)
+					xml = dicttoxml.dicttoxml(output_data, attr_type=False, root=False)		
+					output_data = xml
+				else:
+					content_type = 'application/json'
+					output_data = msgconv.extract_values(msg)
+					output_data = json.dumps(output_data)
+
 			#rospy.loginfo('ret 1: %s, type: %s',output_data, content_type)
 			return response_200(start_response, output_data, content_type=content_type)
 		
@@ -579,11 +596,8 @@ class RostfulServer:
 				msgconv.populate_instance(input_data, input_msg)
 				content_type = 'application/jwt'
 			elif content_type == 'application/json':
-				rospy.logwarn(input_data)
 				input_data = json.loads(input_data)
-				rospy.logwarn(input_data)
 				input_data.pop('_format', None)	
-				rospy.logwarn(input_data)
 				msgconv.populate_instance(input_data, input_msg)
 			elif content_type == 'application/xml':
 				input_data = fromstring(input_data)
