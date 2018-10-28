@@ -409,13 +409,17 @@ class RostfulServer:
 			pass
 	
 	def _handle_get(self, environ, start_response):
+		output_data = None
 		path = environ['PATH_INFO']
+		if path.endswith('/'):
+			path = path[:len(path)-1]
 		full = get_query_bool(environ['QUERY_STRING'], 'full')
 
 		kwargs = urlparse.parse_qs(environ['QUERY_STRING'], keep_blank_values=True)
 		for key in kwargs:
 			kwargs[key] = kwargs[key][-1]
 
+		# TODO: rest_prefix should be after the response type prefix
 		if self.rest_prefix and path.startswith(self.rest_prefix):
 			path = path[len(self.rest_prefix):]
 		
@@ -461,7 +465,27 @@ class RostfulServer:
 						msg = action.get(action_suffix)
 						break
 				else:
-					return response_404(start_response)
+					# If the path does not exist, we need to
+					# check if the user is trying to get an 
+					# attribute of a message returned by a topic
+					# that has an existing path
+					topic_keys = self.topics.keys()
+					for key in topic_keys:
+						if path.startswith(key):
+							# TODO: Manage if is allowed to subscribe
+							topic = self.topics[key]
+							topic_name = topic.name
+							msg = topic.get()
+
+							msg_atribs = path[len(key)+1:].split('/')
+							if len(msg_atribs) > 0:
+								msg_json = msgconv.extract_values(msg)
+								for atrib in msg_atribs:
+									msg_json = msg_json[atrib]
+									output_data = {atrib: msg_json}
+							break
+					else:
+						return response_404(start_response)
 			else:
 				topic = self.topics[path]
 				
@@ -488,14 +512,14 @@ class RostfulServer:
 				output_data = msgconv.extract_values(msg)
 				output_data = self.jwt_iface.encode(output_data)
 			else:
+				if output_data is None:
+					output_data = msgconv.extract_values(msg)
 				if first_path[0] == "xml":
 					content_type = 'application/xml'
-					output_data = msgconv.extract_values(msg)
 					xml = dicttoxml.dicttoxml(output_data, attr_type=False, root=False)		
 					output_data = xml
 				else:
 					content_type = 'application/json'
-					output_data = msgconv.extract_values(msg)
 					output_data = json.dumps(output_data)
 
 			#rospy.loginfo('ret 1: %s, type: %s',output_data, content_type)
