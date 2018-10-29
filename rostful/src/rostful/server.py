@@ -314,7 +314,7 @@ class RostfulServer:
 				service_name_key = service_name[1:]
 			else:
 				service_name_key = service_name
-			for prefix_type in self.args_dict['service_types']:
+			for prefix_type in self.args_dict['types']:
 				if not self.services.has_key(prefix_type+"/"+service_name_key) and not self.services.has_key(service_name_key):
 					ret = self.add_service(service_name, ws_name=prefix_type)
 					if ret: rospy.loginfo('RostfulServer::add_services: added %s', service_name)
@@ -360,10 +360,10 @@ class RostfulServer:
 				topic_name_key = topic_name[1:]
 			else:
 				topic_name_key = topic_name
-			for prefix_type in self.args_dict['topic_types']:
+			for prefix_type in self.args_dict['types']:
 				if not self.topics.has_key(prefix_type+"/"+topic_name_key) and not self.topics.has_key(topic_name_key):
-					ret = self.add_topic(topic_name, ws_name=prefix_type,
-                                            allow_pub=allow_pub, allow_sub=allow_sub)
+					self.add_topic(topic_name, ws_name=prefix_type,
+					               allow_pub=allow_pub, allow_sub=allow_sub)
 	
 	def add_action(self, action_name, ws_name=None, action_type=None):
 		if action_type is None:
@@ -423,7 +423,6 @@ class RostfulServer:
 		if self.rest_prefix and path.startswith(self.rest_prefix):
 			path = path[len(self.rest_prefix):]
 		
-		json_suffix = '.json'
 		jsn = False
 		handler = NullTransform()
 		first_path = path.split('/')[0].split('.')
@@ -472,9 +471,12 @@ class RostfulServer:
 					topic_keys = self.topics.keys()
 					for key in topic_keys:
 						if path.startswith(key):
-							# TODO: Manage if is allowed to subscribe
 							topic = self.topics[key]
 							topic_name = topic.name
+							if not topic.allow_sub:
+								rospy.logwarn(
+									"RostfulServer::handle_get: %s does not allow subscription", topic)
+								return response_405(start_response)
 							msg = topic.get()
 
 							msg_atribs = path[len(key)+1:].split('/')
@@ -490,6 +492,7 @@ class RostfulServer:
 				topic = self.topics[path]
 				
 				if not topic.allow_sub:
+					rospy.logwarn("RostfulServer::handle_get: %s does not allow subscription", topic)
 					return response_405(start_response)
 				
 				topic_name = topic.name
@@ -601,6 +604,8 @@ class RostfulServer:
 				mode = 'topic'
 				topic = self.topics[name]
 				if not topic.allow_pub:
+					rospy.logwarn(
+						"RostfulServer::handle_post: %s does not allow publication", topic)
 					return response_405(start_response)
 				input_msg_type = topic.rostype
 			else:
@@ -683,8 +688,8 @@ class RostfulServer:
 		if not rospy.is_shutdown():
 			self.add_services(self.args_dict['services'])
 			self.add_topics(self.args_dict['topics'])
-			#self.add_topics(self.args.publishes, allow_pub=False)
-			#self.add_topics(self.args.subscribes, allow_sub=False)
+			self.add_topics(self.args_dict['publishes'], allow_sub=False)
+			self.add_topics(self.args_dict['subscribes'], allow_pub=False)
 			self.add_actions(self.args.actions)
 			
 			self.t_ros_setup = threading.Timer(self.ros_setup_timer, self.rosSetup)
@@ -697,30 +702,37 @@ from wsgiref.simple_server import make_server
 
 def servermain():
 	rospy.init_node('rostful_server', anonymous=True, disable_signals=True)
-	topics_list = rospy.get_param("~topics")
-	services_list = rospy.get_param("~services")
+	
 	args_dict = {}
 
-	args_dict['topic_types'] = ['']
-	if topics_list.has_key('types'):
-		args_dict['topic_types'] = topics_list['types']
-	args_dict['topics'] = topics_list['topics_list']
+	default_params = {
+		'host'       : 'localhost',
+		'port'       : 8080,
+		'topics'     : [],
+		'subscribes' : [],
+		'publishes'  : [],
+		'services'   : [],
+		'types'	     : []
+	}
 
-	args_dict['service_types'] = ['']
-	if services_list.has_key('types'):
-		args_dict['service_types'] = services_list['types']
-	args_dict['services'] = services_list['services_list']
+	for key in default_params.keys():
+		if rospy.has_param('~' + key):
+			args_dict[key] = rospy.get_param('~' + key)
+		else:
+			args_dict[key] = default_params[key]
+			rospy.logwarn("%s: '%s' param not defined, the default value is %s",
+			              rospy.get_name(), key, default_params[key])
 
 	parser = argparse.ArgumentParser()
 	
 	#parser.add_argument('--services', '--srv', nargs='+', help='Services to advertise')
 	#parser.add_argument('--topics', nargs='+', help='Topics to both publish and subscribe')
-	parser.add_argument('--publishes', '--pub', nargs='+', help='Topics to publish via web services')
-	parser.add_argument('--subscribes', '--sub', nargs='+', help='Topics to allowing publishing to via web services')
+	#parser.add_argument('--publishes', '--pub', nargs='+', help='Topics to publish via web services')
+	#parser.add_argument('--subscribes', '--sub', nargs='+', help='Topics to allowing publishing to via web services')
 	parser.add_argument('--actions', nargs='+', help='Actions to advertise')
 	
-	parser.add_argument('--host', default='')
-	parser.add_argument('-p', '--port', type=int, default=8080)
+	#parser.add_argument('--host', default='')
+	#parser.add_argument('-p', '--port', type=int, default=8080)
 	parser.add_argument('--rest-prefix', default='/', help='The prefix path of the http request, usually starting and ending with a "/".')
 	parser.add_argument('--jwt', action='store_true', default=False, help='This argument enables the use of JWT to guarantee a secure transmission')
 	parser.add_argument('--jwt-key', default='ros', help='This arguments sets the key to encode/decode the data')
@@ -731,19 +743,20 @@ def servermain():
 	if rospy.search_param('init_delay'):
 		init_delay = rospy.get_param('~init_delay')
 	
-	rospy.logwarn('rostful_server: Delaying the start %d seconds', init_delay)
+	rospy.logwarn('%s: Delaying the start %d seconds', rospy.get_name(), init_delay)
 	time.sleep(init_delay)
 	
 	try:
 		server = RostfulServer(args, args_dict)
 		
-		httpd = make_server(args.host, args.port, server.wsgifunc())
-		rospy.loginfo('rostful_server: Started server on  %s:%d', args.host, args.port)
+		httpd = make_server(args_dict['host'], args_dict['port'], server.wsgifunc())
+		rospy.loginfo('%s: Started server on %s:%d', rospy.get_name(),
+		              args_dict['host'], args_dict['port'])
 		
 		#Wait forever for incoming http requests
 		httpd.serve_forever()
 		
 	except KeyboardInterrupt:
-		rospy.loginfo('rostful_server: Shutting down the server')
+		rospy.loginfo('%s: Shutting down the server', rospy.get_name())
 		httpd.socket.close()
 		rospy.signal_shutdown('Closing')
