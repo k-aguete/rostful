@@ -1,8 +1,9 @@
 # Configuration file for rostful server.
 
 host: localhost
-
 port: 8080
+
+rest-prefix: /
 
 # List of topics to be served. The topics in this
 # list can be published and subscribed using rostful
