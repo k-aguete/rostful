@@ -265,13 +265,12 @@ class RostfulServer:
 		self.services = {}
 		self.topics = {}
 		self.actions = {}
-		self.rest_prefix = '/'
+		self.rest_prefix = args_dict["rest-prefix"]
 		self._use_jwt = args.jwt
 		self.jwt_iface = JwtInterface(key = args.jwt_key, algorithm = args.jwt_alg)
 		self.ros_setup_timer = 10
 		self.args = args
 		self.args_dict = args_dict
-		self.rest_prefix = args.rest_prefix
 		
 		if self.rest_prefix != '/':
 			if not self.rest_prefix.startswith('/'):
@@ -325,7 +324,7 @@ class RostfulServer:
 		if topic_type is None:
 			topic_type, _, _ = rostopic.get_topic_type(resolved_topic_name)
 			if not topic_type:
-				rospy.logerr('RostfulServer: add_topic: Unknown topic %s', topic_name)
+				rospy.logerr('RostfulServer::add_topic: Unknown topic %s', topic_name)
 				return False
 		
 		if ws_name is None:
@@ -411,6 +410,28 @@ class RostfulServer:
 	def _handle_get(self, environ, start_response):
 		output_data = None
 		path = environ['PATH_INFO']
+
+		# Create index page
+		if path == '/':
+			data = "<html><head></head><body><h1>Server configuration</h1>"
+			data = data + "<h2>Topics</h2>"
+			for topic_key in sorted(self.topics.keys())	:
+				data = data + "<h3><a href=" + \
+                                    self.args_dict["host"]+":"+str(self.args_dict["port"]) + \
+                                    "/"+topic_key+">"+topic_key+"</a></h3>"
+			data = data + "</body></html>"
+			
+			data = data + "<h2>Services</h2>"
+			for service_key in sorted(self.services.keys())	:
+				data = data + "<h3><a href=" + \
+                                    self.args_dict["host"]+":"+str(self.args_dict["port"]) + \
+                                    "/"+service_key+">"+service_key+"</a></h3>"
+			data = data + "</body></html>"
+			headers = [('Content-Type', 'text/html'),
+                            ('Content-Length', str(data))]
+			start_response('200 OK', headers)
+			return data 
+
 		if path.endswith('/'):
 			path = path[:len(path)-1]
 		full = get_query_bool(environ['QUERY_STRING'], 'full')
@@ -712,7 +733,8 @@ def servermain():
 		'subscribes' : [],
 		'publishes'  : [],
 		'services'   : [],
-		'types'	     : []
+		'types'	     : [],
+		'rest-prefix': '/'
 	}
 
 	for key in default_params.keys():
@@ -733,7 +755,7 @@ def servermain():
 	
 	#parser.add_argument('--host', default='')
 	#parser.add_argument('-p', '--port', type=int, default=8080)
-	parser.add_argument('--rest-prefix', default='/', help='The prefix path of the http request, usually starting and ending with a "/".')
+	#parser.add_argument('--rest-prefix', default='/', help='The prefix path of the http request, usually starting and ending with a "/".')
 	parser.add_argument('--jwt', action='store_true', default=False, help='This argument enables the use of JWT to guarantee a secure transmission')
 	parser.add_argument('--jwt-key', default='ros', help='This arguments sets the key to encode/decode the data')
 	parser.add_argument('--jwt-alg', default='HS256', help='This arguments sets the algorithm to encode/decode the data')
