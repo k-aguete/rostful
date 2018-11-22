@@ -29,6 +29,8 @@ from .jwt_interface import JwtInterface
 from xmljson import abdera
 from xml.etree.ElementTree import fromstring
 
+import xmltodict
+
 import dicttoxml
 
 TOPIC_SUBSCRIBER_TIMEOUT=5.0
@@ -657,10 +659,17 @@ class RostfulServer:
 				input_data.pop('_format', None)	
 				msgconv.populate_instance(input_data, input_msg)
 			elif content_type == 'application/xml':
-				input_data = fromstring(input_data)
-				input_data = abdera.data(input_data)
+				input_data = xmltodict.parse(input_data, postprocessor=postprocessor)
 				input_data = json.dumps(input_data)
 				input_data = json.loads(input_data)
+				
+				# First check if the the key mission exist, otherwise it will raise an exception
+				if input_data.get('mission') != None:	
+					
+					# Then check if inside mission we have the key params due to we have to convert the dict to string
+					if input_data["mission"].get('params') != None: 
+						input_data["mission"]["params"] = json.dumps(input_data["mission"]["params"])
+				
 				input_data.pop('_format', None)
 				msgconv.populate_instance(input_data, input_msg)
 			
@@ -716,7 +725,15 @@ class RostfulServer:
 			self.t_ros_setup = threading.Timer(self.ros_setup_timer, self.rosSetup)
 			self.t_ros_setup.start()
 		
-		
+def postprocessor(path, key, value):
+	try: 
+		return key + '', int(value)
+	except (ValueError, TypeError):
+		try:
+			return key + '', float(value)
+		except (ValueError, TypeError):
+			return key, value
+
 	
 import argparse
 from wsgiref.simple_server import make_server
