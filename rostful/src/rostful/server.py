@@ -26,12 +26,10 @@ from .util import ROS_MSG_MIMETYPE, get_query_bool
 import time, threading
 
 from .jwt_interface import JwtInterface
-from xmljson import abdera
+
 from xml.etree.ElementTree import fromstring
 
-import xmltodict
 
-import dicttoxml
 
 TOPIC_SUBSCRIBER_TIMEOUT=5.0
 
