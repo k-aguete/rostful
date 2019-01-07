@@ -29,6 +29,8 @@ from .jwt_interface import JwtInterface
 
 from xml.etree.ElementTree import fromstring
 
+import xmltodict
+import dicttoxml
 
 
 TOPIC_SUBSCRIBER_TIMEOUT=5.0
