@@ -700,6 +700,14 @@ class RostfulServer:
 				output_data['_format'] = 'ros'
 				output_data = self.jwt_iface.encode(output_data)
 				content_type = 'application/jwt'
+			# Check if the petition is in xml
+			elif content_type == 'application/xml':
+				output_data = msgconv.extract_values(ret_msg)
+				output_data['_format'] = 'ros'
+				output_data = dicttoxml.dicttoxml(output_data, attr_type=False, root=False)
+				print(output_data)
+				content_type = 'application/xml'
+			# By default uses JSON
 			else:
 				output_data = msgconv.extract_values(ret_msg)
 				output_data['_format'] = 'ros'
