@@ -669,6 +669,12 @@ class RostfulServer:
 					# Then check if inside mission we have the key params due to we have to convert the dict to string
 					if input_data["mission"].get('params') != None: 
 						input_data["mission"]["params"] = json.dumps(input_data["mission"]["params"])
+
+				if input_data.get('goal') != None:
+					if input_data["goal"].get('steps') != None:
+						input_data["goal"]["steps"] = input_data["goal"]["steps"].replace("[", "").replace("]", "").replace("\"", "").replace(" ", "")
+						input_data["goal"]["steps"] = input_data["goal"]["steps"].split(",")
+						print(input_data["goal"]["steps"])
 				
 				input_data.pop('_format', None)
 				msgconv.populate_instance(input_data, input_msg)
@@ -697,20 +703,20 @@ class RostfulServer:
 				output_data = output_data.getvalue()
 			elif self._use_jwt:
 				output_data = msgconv.extract_values(ret_msg)
-				output_data['_format'] = 'ros'
+				#output_data['_format'] = 'ros'
 				output_data = self.jwt_iface.encode(output_data)
 				content_type = 'application/jwt'
 			# Check if the petition is in xml
 			elif content_type == 'application/xml':
 				output_data = msgconv.extract_values(ret_msg)
-				output_data['_format'] = 'ros'
+				#output_data['_format'] = 'ros'
 				output_data = dicttoxml.dicttoxml(output_data, attr_type=False, root=False)
 				print(output_data)
 				content_type = 'application/xml'
 			# By default uses JSON
 			else:
 				output_data = msgconv.extract_values(ret_msg)
-				output_data['_format'] = 'ros'
+				#output_data['_format'] = 'ros'
 				output_data = json.dumps(output_data)
 				content_type = 'application/json'
 			
