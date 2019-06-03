@@ -7,11 +7,12 @@
 
   <license>BSD</license>
 
-  <url type="repository">https://github.com/benkehoe/rostful</url>
-  <url type="bugtracker">https://github.com/benkehoe/rostful/issues</url>
+  <url type="repository">https://github.com/RobotnikAutomation/rostful</url>
+  <url type="bugtracker">https://github.com/RobotnikAutomation/rostful/issues</url>
 
   <author>Ben Kehoe</author>
   <maintainer email="asmodehn@gmail.com">AlexV</maintainer>
+  <maintainer email="rnavarro@robotnik.es">Román Navarro</maintainer>
 
   <buildtool_depend>catkin</buildtool_depend>
 
