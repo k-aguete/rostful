@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<launch>
+  
+  <node pkg="rostful" type="server" name="rostful_server" output="screen">
+    <rosparam command="load" file="$(find rostful)/config/server.yaml"/>
+  </node>
+
+</launch>
+
+

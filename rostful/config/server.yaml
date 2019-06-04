@@ -8,21 +8,22 @@ rest-prefix: /
 # List of topics to be served. The topics in this
 # list can be published and subscribed using rostful
 topics:
-  - /rb1_base_a/joint_states
-  - /rb1_base_a/robotnik_base_control/odom
+  - /rb1_base/robotnik_base_control/cmd_vel
+    
 
 # List of topics to be served only for subscription.
 subscribes:
-  - /rb1_base_a/imu/data
+  - /rb1_base/imu/data
+  - /rb1_base/joint_states
+  - /rb1_base/robotnik_base_control/odom
 
 # List of topics to be served only for publication.
 publishes:
-  - /rb1_base_a/cmd_vel
-
+  - /rb1_base/cmd_vel
 # List of services to be served
 services:
-  - /rb1_base_a/calibrate_imu_gyro
-  - /rb1_base_a/reset_odometry
+  - /rb1_base/calibrate_imu_gyro
+  - /rb1_base/reset_odometry
 
 # Types of the GET requests.
 # If there are types definied, an prefix will be applied 
