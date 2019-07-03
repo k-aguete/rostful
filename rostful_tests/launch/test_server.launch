@@ -4,6 +4,6 @@
   <arg name="port"	default="11211"/>
  
   <node pkg="rostful" type="server" name="rostful_server" output="screen"
-	args="--host $(arg host) -p $(arg port) --rest-prefix ros --pub /battery --sub /robot_emotion --services /request_waypoints"/>
+	args="--host $(arg host) -p $(arg port) --rest-prefix ros --pub /battery --sub /robot_emotion --srv /request_waypoints"/>
 </launch>
 
