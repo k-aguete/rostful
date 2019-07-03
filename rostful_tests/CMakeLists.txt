@@ -165,6 +165,11 @@ catkin_package(
 #   # myfile2
 #   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 # )
+install(DIRECTORY scripts/
+        DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+        USE_SOURCE_PERMISSIONS)
+install(DIRECTORY launch
+        DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
 
 #############
 ## Testing ##
