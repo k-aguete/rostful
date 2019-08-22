@@ -18,5 +18,5 @@ fi
 
 sudo -H pip install pyjwt
 sudo dpkg -i ros-"$ros_distro"-rostful_0.0.2-0"$code_name"_amd64.deb
-sudo dpkg -i ros-"$ros_distro"-rostful-tests_1.0.0-0"$code_name"_amd64.deb
+sudo dpkg -i ros-"$ros_distro"-rostful-tests_1.0.1-0"$code_name"_amd64.deb
 

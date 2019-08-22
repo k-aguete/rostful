@@ -2,8 +2,11 @@
 <launch>
   <arg name="host"	default="0.0.0.0"/>
   <arg name="port"	default="11211"/>
+  <arg name="subscribers" default="/battery /nav_ctrl_status /dock_error /flag_report /ping_data /system_monitor /amcl_pose"/>
+  <arg name="publishers" default="/robot_emotion /nav_ctrl /dock_goal /set_velocity /motor_0/set_velocity /motor_1/set_velocity"/>
+  <arg name="rest_prefix" default="ros"/>
  
   <node pkg="rostful" type="server" name="rostful_server" output="screen"
-	args="--host $(arg host) -p $(arg port) --rest-prefix ros --pub /battery --sub /robot_emotion --srv /request_waypoints"/>
+	args="--host $(arg host) -p $(arg port) --rest-prefix $(arg rest_prefix) --pub $(arg subscribers) --sub $(arg publishers) --srv /request_waypoints"/>
 </launch>
 
